@@ -2,5 +2,6 @@
 
 # Next.js / Node
 node_modules/
+.pnpm-store/
 .next/
 next-env.d.ts
