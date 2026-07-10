@@ -1,6 +1,9 @@
 services:
   web:
-    build: .
+    build:
+      context: .
+      target: dev
+      network: host
     network_mode: host
     volumes:
       - .:/app
