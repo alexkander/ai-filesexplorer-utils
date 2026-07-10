@@ -3,5 +3,14 @@
   "dockerComposeFile": "../docker-compose.yml",
   "service": "web",
   "workspaceFolder": "/app",
-  "shutdownAction": "stopCompose"
+  "shutdownAction": "stopCompose",
+  "features": {
+    "ghcr.io/devcontainers/features/git:1": {},
+    "ghcr.io/devcontainers/features/common-utils:2": {
+      "installZsh": true,
+      "configureZshAsDefaultShell": true,
+      "installOhMyZsh": true,
+      "username": "node"
+    }
+  }
 }
