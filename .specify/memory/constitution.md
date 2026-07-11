@@ -1,5 +1,22 @@
 <!--
 Sync Impact Report
+- Version change: 1.0.0 → 1.1.0
+- Modified principles: n/a
+- Added sections:
+  - Development Workflow: new bullet requiring `pnpm add`/`pnpm add -D` for new dependencies
+    (never hand-editing `package.json` alone), to keep `pnpm-lock.yaml` in sync with the
+    Dockerfile's `pnpm install --frozen-lockfile` step. Prompted by a /speckit-analyze finding
+    on feature 001-dashboard-shell: tasks.md described adding new dependencies by directly
+    editing `package.json`, which risked a stale lockfile breaking both Docker build stages.
+- Removed sections: none
+- Templates requiring updates:
+  - ✅ .specify/templates/plan-template.md (no changes needed)
+  - ✅ .specify/templates/tasks-template.md (no changes needed)
+  - ✅ .specify/templates/spec-template.md (no changes needed)
+  - ✅ CLAUDE.md (no changes needed — doesn't document a dependency-add workflow)
+- Follow-up TODOs: none
+
+Sync Impact Report (previous — 1.0.0 ratification)
 - Version change: (unratified template) → 1.0.0
 - Modified principles: n/a (first ratified version; template placeholders filled)
 - Added sections:
@@ -132,6 +149,10 @@ changelog generation even without a formal release process.
   changed feature is required before a change is considered complete.
 - Every `/speckit-plan` run MUST include a Constitution Check gate that evaluates the plan against
   the principles above before Phase 0 research, and again after Phase 1 design.
+- New dependencies MUST be added via `pnpm add` / `pnpm add -D` (never by hand-editing
+  `package.json` alone), so `pnpm-lock.yaml` stays in sync with it. Both Dockerfile stages run
+  `pnpm install --frozen-lockfile`, which fails outright if the lockfile has drifted from
+  `package.json`.
 
 ## Governance
 
@@ -150,4 +171,4 @@ changed and which dependent templates/docs were checked or updated.
 **Compliance review**: Any deviation from a principle above MUST be justified in the relevant
 plan's Complexity Tracking table, or the simpler, compliant alternative MUST be used instead.
 
-**Version**: 1.0.0 | **Ratified**: 2026-07-11 | **Last Amended**: 2026-07-11
+**Version**: 1.1.0 | **Ratified**: 2026-07-11 | **Last Amended**: 2026-07-11
