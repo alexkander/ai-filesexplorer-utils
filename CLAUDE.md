@@ -5,25 +5,58 @@ code in this repository.
 
 ## Overview
 
-Next.js (App Router) + TypeScript project, package-managed with pnpm.
+Next.js 16 (App Router) + React 19 + TypeScript project, package-managed with
+pnpm. Web utilities for organizing files (file counts per directory, content
+checksums, folder sync, etc. — per the README) — the app is currently an
+early-stage scaffold (`app/page.tsx` / `app/layout.tsx` only, no routes, no
+tests yet).
 
 ## Commands
 
-- `pnpm dev` — start the dev server
-- `pnpm build` — production build
+- `pnpm dev` — start the dev server (http://localhost:3000)
+- `pnpm build` — production build (`output: 'standalone'` in `next.config.ts`)
 - `pnpm start` — run the production build
 - `pnpm lint` / `pnpm lint:fix` — ESLint (flat config, `eslint.config.mjs`,
-  based on `eslint-config-next`)
+  based on `eslint-config-next` + `eslint-config-prettier`)
 - `pnpm format` / `pnpm format:check` — Prettier
+
+There is no test suite configured yet (no test script in `package.json`).
 
 ## Git hooks
 
 Husky + lint-staged run ESLint (`--fix`) and Prettier on staged files
-automatically on every commit (`.husky/pre-commit`). No manual step is needed;
-just commit as usual.
+automatically on every commit (`.husky/pre-commit` → `pnpm exec lint-staged`).
+No manual step is needed; just commit as usual.
+
+## TypeScript / style conventions
+
+- `tsconfig.json` has `strict: true`; path alias `@/*` maps to the repo root.
+- Prettier: single quotes, semicolons, trailing commas everywhere, 80-col print
+  width (`.prettierrc.json`).
+
+## Docker / devcontainer
+
+Local dev and prod both build from the same multi-stage `Dockerfile`, so there's
+nothing duplicated between them:
+
+- `dev` stage: `node:22-bookworm-slim`, installs deps with pnpm, runs
+  `pnpm run dev`. Used by `docker-compose.yml` (`network_mode: host`, source
+  mounted as a volume for hot-reload, `node_modules`/`.next` as anonymous
+  volumes). `.devcontainer/devcontainer.json` points at this same
+  `docker-compose.yml`, so the VS Code Dev Container and plain `docker compose`
+  workflows share one image/config.
+- `runner` stage: `node:22-alpine`, copies only the Next.js `standalone` output
+  — no pnpm, no source. Used by `docker-compose.prod.yml` (port `3000:3000`
+  published, no bind mounts).
+
+Wrapper scripts (`scripts/dev.sh`, `scripts/dev-down.sh`, `scripts/prod.sh`,
+`scripts/prod-down.sh`) just call
+`docker compose [-f docker-compose.prod.yml] up --build -d` / `down` from the
+repo root.
 
 ## Architecture
 
 - `app/` — Next.js App Router pages/layouts.
-- Docker/devcontainer setup for local dev and prod (`Dockerfile`,
-  `docker-compose*.yml`, `scripts/*.sh`, `.devcontainer/`).
+- No environment variables are required currently; if any are added, follow
+  Next.js convention (`.env.local` for local values, `NEXT_PUBLIC_` prefix only
+  for values that must reach the browser).
