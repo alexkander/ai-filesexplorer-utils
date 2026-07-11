@@ -62,7 +62,12 @@ interface ScanRepositoryPort {
 
 - `process-directory.ts`: `recordOwnResult`, plus `upsertPending` for each
   discovered subdirectory before pushing it onto the in-memory stack.
-- `start-scan.ts`: `upsertPending` for the requested root path.
+- `start-scan.ts`: `upsertPending` for the requested root path (`mode: 'full'`,
+  or `mode: 'incremental'` when the root itself isn't already fully done). For
+  `mode: 'incremental'`, also calls `getSubtree(path)` once up front — reusing
+  the same method `get-directory-status.ts` uses — to build the run's `doneSet`
+  (research.md Decision 10, `data-model.md` "Done-subtree set"); no new port
+  method needed.
 - `stop-scan.ts`: `markStopped` for the active path and any already-`pending`
   descendants found via `getSubtree`.
 - `get-directory-status.ts` / `list-directory.ts`: both call `getSubtree` — once

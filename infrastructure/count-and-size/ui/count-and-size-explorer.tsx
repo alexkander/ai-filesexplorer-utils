@@ -59,6 +59,7 @@ export function CountAndSizeExplorer() {
           view={view}
           starting={starting}
           onScan={() => void scan()}
+          onForceFullRescan={() => void scan('full')}
           onStop={() => void stop()}
         />
       </div>

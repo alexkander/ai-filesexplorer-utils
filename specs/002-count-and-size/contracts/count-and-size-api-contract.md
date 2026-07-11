@@ -79,13 +79,23 @@ the client shows "not scanned yet" (FR-005).
 
 ## `POST /api/count-and-size/scan`
 
-Body: `{ "path": "/home/user" }`. Starts (or re-starts, per FR-021) a scan
-rooted at `path` (FR-006, FR-007, FR-012, FR-013).
+Body: `{ "path": "/home/user", "mode"?: "incremental" | "full" }`. Starts (or
+re-starts) a scan rooted at `path` (FR-006, FR-007, FR-012, FR-013). `mode`
+defaults to `"incremental"` when omitted (FR-021): only paths in `path`'s
+subtree that are missing, errored, stopped, or completed-but-incomplete are
+(re)scanned — subdirectories already fully `completed` and not incomplete are
+left untouched. `mode: "full"` (FR-021a) ignores all existing state and rescans
+the entire subtree from scratch, exactly as this endpoint always behaved before
+this revision. The page-level "Scan" button and the per-row scan trigger
+(Decision 5c) both omit `mode` (incremental); the page-level "Force full rescan"
+button (research.md Decision 11) is the only caller that sends `mode: "full"`.
 
 **Response `202`**: `{ "accepted": true }` — always returns immediately; the
 scan itself runs in the background (FR-017). Accepted whether or not another
 scan is currently active elsewhere — the request is enqueued (FR-013), never
-rejected.
+rejected. With `mode: "incremental"`, if `path`'s entire subtree is already
+`completed` and not incomplete, the request is still accepted but nothing is
+actually (re)enqueued — there is nothing outstanding to process.
 
 ## `POST /api/count-and-size/stop`
 
