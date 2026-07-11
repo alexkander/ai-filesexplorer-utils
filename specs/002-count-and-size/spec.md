@@ -67,6 +67,19 @@ asynchronous. Propose how to persist all this information."
   affecting it is active; this does not extend to a full real-time push
   architecture for the whole tree.
 
+### Session 2026-07-11 (revision)
+
+- Q: The original decision (above) made every "Scan" press a full rescan of the
+  entire subtree, even when most of it already completed successfully. Should
+  the default action skip already-completed parts, and if so, how does a user
+  intentionally force a full redo? → A: Split into two actions — the default
+  "Scan" action becomes incremental (it only (re)processes subdirectories that
+  are missing, errored, stopped, or otherwise incomplete, leaving
+  already-Completed-and-not-incomplete parts untouched), and a new, separate
+  "Force full rescan" action is added that reproduces the old behavior —
+  ignoring all existing state and rescanning the entire subtree from scratch.
+  FR-021 is revised accordingly and FR-021a/FR-021b are added.
+
 ## User Scenarios & Testing _(mandatory)_
 
 ### User Story 1 - Browse the filesystem and see scan status at a glance (Priority: P1)
@@ -160,12 +173,30 @@ last-scanned timestamp.
 4. **Given** a scan is already active somewhere in the tree, **When** the user
    presses "Scan" on another directory, **Then** the new request is queued
    rather than run at the same time as the active one.
-5. **Given** a directory already has prior scan data, **When** the user presses
-   "Scan" on it again, **Then** its entire subtree is scanned again from scratch
-   and the previous results are overwritten once the new scan completes.
+5. **Given** a directory already has prior scan data where every part of its
+   subtree reached Completed without the incomplete flag, **When** the user
+   presses "Scan" on it again, **Then** nothing is re-scanned (there is nothing
+   outstanding to process) and the existing results/timestamps are left as-is.
+   5a. **Given** a directory already has prior scan data where some part of its
+   subtree is missing, errored, stopped, or flagged incomplete, **When** the
+   user presses "Scan" on it again, **Then** only those outstanding parts are
+   (re)scanned — subdirectories that previously reached Completed without the
+   incomplete flag are left untouched — and the directory's totals are
+   recomputed from the combined old and newly-scanned data once finished. 5b.
+   **Given** a directory has any prior scan data (complete or partial), **When**
+   the user presses the separate "Force full rescan" action instead of "Scan",
+   **Then** its entire subtree is scanned again from scratch, ignoring all
+   existing state, and the previous results are overwritten once the new scan
+   completes. 5c. **Given** a scan was interrupted by an application restart or
+   crash (leaving some procedures Stopped), **When** the user later presses
+   "Scan" on an ancestor of those procedures, **Then** only the Stopped (and any
+   other outstanding) procedures are resumed — Completed-and-not-incomplete
+   siblings are not redone.
 6. **Given** the user is viewing a directory's listing, **When** they use a
    subdirectory's own scan action instead of the page-level "Scan" button,
-   **Then** only that subdirectory (and its own descendants) is scanned, shown
+   **Then** only that subdirectory (and its own descendants) is scanned
+   incrementally (same skip-if-already-Completed behavior as the page-level
+   "Scan" action; no force-full-rescan option exists at the row level), shown
    with a loading indicator on that row until it reaches a terminal state.
 
 ---
@@ -225,6 +256,14 @@ computed.
 - What happens when the user presses Stop on a top-level scan that has already
   spawned several nested descendant procedures? Stopping applies to the whole
   in-flight subtree, not only the top directory.
+- What happens when the user presses "Scan" on a directory whose entire subtree
+  is already Completed and not flagged incomplete? Nothing is (re)scanned; the
+  existing results and last-scanned timestamps are left untouched.
+- What happens when the user presses "Force full rescan" while another scan (of
+  any directory) is already active? Same as the existing "Scan" action: the
+  request is enqueued rather than run concurrently or discarded (FR-012,
+  FR-013), and the action is unavailable/disabled until the active scan
+  finishes.
 
 ## Requirements _(mandatory)_
 
@@ -334,9 +373,23 @@ computed.
   Scanning status.
 - **FR-020**: Each scan procedure MUST record the depth level of its directory
   (its distance from the root "/").
-- **FR-021**: Starting a scan on a directory that already has prior (complete or
-  partial) data MUST perform a full rescan of that directory's entire subtree,
-  overwriting the previous results once the new scan completes.
+- **FR-021**: The default "Scan" action MUST behave incrementally: starting it
+  on a directory MUST (re)process only the parts of that directory's subtree
+  that are Not scanned, Error, Stopped, or Completed-but-flagged-incomplete; any
+  subdirectory whose most recent procedure reached Completed without the
+  incomplete flag MUST be left untouched (not re-scanned, results and timestamp
+  unchanged). (Revised: this action originally always performed a full rescan
+  from scratch — see FR-021a for that behavior, now split into its own explicit
+  action.)
+- **FR-021a**: The system MUST provide a separate, explicit "Force full rescan"
+  action for the directory currently being viewed that ignores all existing
+  procedure state for that directory's entire subtree and rescans it from
+  scratch, overwriting previous results once the new scan completes.
+- **FR-021b**: The "Force full rescan" action MUST be available at all times for
+  the directory currently being viewed, subject to the same constraints as the
+  "Scan" action (FR-006, FR-012, FR-013): requesting it while a scan is already
+  active (for this directory or elsewhere) does not run it concurrently — it is
+  enqueued the same way any other scan request is.
 - **FR-022**: All count/size results, per-directory procedure state,
   last-scanned timestamps, and depth level MUST be persisted so they remain
   available after an application restart.
@@ -382,6 +435,12 @@ computed.
 - **SC-007**: Browsing into a directory with a very large number of direct
   entries remains responsive — the page does not freeze or become unusable while
   the listing loads.
+- **SC-008**: Re-running "Scan" on a directory that already has complete results
+  does no redundant work — parts of the subtree already Completed and not
+  flagged incomplete are left as-is, so re-running "Scan" after an interruption
+  only takes as long as finishing the outstanding parts, not a full subtree
+  rescan. A "Force full rescan" action remains available whenever the user
+  deliberately wants to redo everything.
 
 ## Assumptions
 
@@ -416,3 +475,16 @@ computed.
   browser), not server-side — consistent with the single-user deployment model,
   and simpler than adding a second persistence mechanism for a single UI
   convenience value that isn't part of the scan data itself.
+- "Completed" for the purposes of the incremental "Scan" action (FR-021) means
+  Completed and not flagged incomplete; a directory whose last procedure was
+  Completed-but-incomplete, Error, or Stopped is treated as outstanding and will
+  be (re)processed on the next "Scan", the same as one that was never scanned.
+  This supersedes the earlier assumption that every "Scan" press always redoes
+  the full subtree — that behavior now lives only in the separate "Force full
+  rescan" action (FR-021a).
+- The incremental "Scan" action determines what's outstanding by re-reading
+  persisted procedure state at the moment it runs, not from any snapshot held in
+  memory across separate scan requests — so a scan resumed after an application
+  restart or crash sees the same up-to-date picture (including procedures the
+  restart itself marked Stopped per FR-019) as one resumed without a restart in
+  between.

@@ -91,9 +91,45 @@ The running process holds exactly one mutable singleton
 
 - `activePath: string | null` — the path currently being processed, or `null` if
   idle (FR-012: at most one).
-- `stack: string[]` — pending paths, LIFO (FR-013/FR-014); pushed to when a
-  directory finishes its own listing and reports its subdirectories, or when
-  `startScan` is called on an idle worker.
+- `stack: ScanStackEntry[]` — pending entries, LIFO (FR-013/FR-014); pushed to
+  when a directory finishes its own listing and reports its subdirectories, or
+  when `startScan` is called on an idle worker.
+
+```ts
+type ScanMode = 'incremental' | 'full';
+
+interface ScanStackEntry {
+  path: string;
+  mode: ScanMode;
+  // Only present for mode: 'incremental'. Computed once per startScan(...,
+  // 'incremental') call (research.md Decision 10) and carried unchanged
+  // through every child entry pushed while unwinding that same run — never
+  // recomputed mid-run, never shared across two different runs' entries.
+  doneSet?: ReadonlySet<string>;
+}
+```
 
 Deliberately not persisted — see `research.md` Decision 2. This directly
-realizes the spec's "Scan Queue" key entity, minus durability.
+realizes the spec's "Scan Queue" key entity, minus durability. `doneSet` is
+likewise deliberately not a field of the `ScanWorker` singleton itself (it would
+then leak across unrelated runs sharing the same global stack) — see Decision 10
+for why it lives on each stack entry instead.
+
+## Done-subtree set (derived — never persisted, never cached across calls)
+
+Computed by the new pure function `domain/count-and-size/derive-done-set.ts`
+(research.md Decision 10), given the full list of `DirectoryScanNode`s returned
+by one `getSubtree(rootPath)` call:
+
+- For each node, walking depth-first from the deepest leaves upward: a path is
+  "done" iff its own `ownOutcome === 'done'`, its own
+  `hasUnreadableEntries === false`, and every child path (by `parentPath`)
+  already present in the subtree is itself "done". A path with no row at all in
+  the subtree is never "done" (nothing to skip).
+- Returns the `Set<string>` of every "done" path in the subtree, including
+  `rootPath` itself if applicable.
+- This mirrors `deriveDirectoryView`'s `incomplete` computation (same
+  done/not-done facts), but returns a `Set` over the whole subtree in one pass
+  instead of a single boolean for one node — the shapes differ because the two
+  callers need different things (skip-or-not per node, vs. one view for the
+  currently-displayed node).

@@ -18,7 +18,13 @@ volume to `docker-compose.prod.yml` that didn't exist before). Aggregated totals
 and the 5-value display state are computed at read time via a recursive SQL
 query over per-directory rows rather than propagated on write, keeping the
 background worker's job simple: pop a path off an in-memory LIFO stack, list it,
-record its own result, push its subdirectories. The browsing UI paginates large
+record its own result, push its subdirectories. Starting a scan defaults to
+incremental mode (spec FR-021/research.md Decision 10): it skips any
+subdirectory whose subtree already reached Completed and not incomplete, via a
+per-invocation "done set" derived once from `getSubtree` and carried through
+that run's stack entries — never cached across separate scan requests. A second,
+explicit "Force full rescan" action (FR-021a, Decision 11) reproduces the
+original always-rescan-everything behavior. The browsing UI paginates large
 directory listings and polls the currently viewed directory's status every 2s
 while a scan affecting it is active. Each listed entry shows its own numbers
 directly (a file's size; a scanned directory's state, count, size, and
@@ -108,6 +114,13 @@ enumeration; both were corrected to describe "incomplete" as a flag shown
 alongside Completed. This is a clarity fix, not a scope change — no re-run of
 `/speckit-clarify` is needed.
 
+**2026-07-11 revision re-check** (incremental scan default + Force full rescan,
+spec FR-021/FR-021a/FR-021b): No new dependency, no new port, no new persisted
+table/column — reuses the existing `getSubtree` query and adds one pure
+`domain/count-and-size/` function plus a small shape change to the
+already-in-memory `ScanStack` entries (Decision 10). Still PASS on all rows
+above; no Complexity Tracking entry needed.
+
 ## Project Structure
 
 ### Documentation (this feature)
@@ -132,8 +145,9 @@ domain/
 └── count-and-size/
     ├── directory-scan-node.ts       # DirectoryScanNode, OwnOutcome types
     ├── derive-directory-view.ts     # Pure: (node, descendantNodes) -> DirectoryView
+    ├── derive-done-set.ts           # Pure: (subtreeNodes) -> Set<path> of fully-done paths (Decision 10)
     ├── should-ignore-entry.ts       # Pure: (RawEntry) -> ignore? + reason (symlink/unreadable)
-    └── scan-stack.ts                # Pure LIFO stack push/pop/contains
+    └── scan-stack.ts                # Pure LIFO stack push/pop/contains; entries are { path, mode, doneSet? }
 
 application/
 └── count-and-size/
@@ -141,9 +155,9 @@ application/
     ├── scan-repository-port.ts      # ScanRepositoryPort interface
     ├── list-directory.ts            # Use case: paginated listing + hasScanData
     ├── get-directory-status.ts      # Use case: DirectoryView for one path
-    ├── start-scan.ts                # Use case: enqueue a path
+    ├── start-scan.ts                # Use case: enqueue a path; mode: 'incremental' | 'full' (Decision 10)
     ├── stop-scan.ts                 # Use case: stop the active scan
-    └── process-directory.ts         # Use case: the worker's per-node step
+    └── process-directory.ts         # Use case: the worker's per-node step; consults doneSet when mode is incremental
 
 infrastructure/
 ├── count-and-size/
@@ -155,7 +169,7 @@ infrastructure/
 │   └── ui/
 │       ├── count-and-size-explorer.tsx  # Owns currentPath client state; Up button; wires the two below
 │       ├── directory-browser.tsx    # Listing + pagination + onNavigate callback (no URL involvement)
-│       ├── scan-status-panel.tsx    # State/incomplete/last-scanned + Scan/Stop buttons + polling
+│       ├── scan-status-panel.tsx    # State/incomplete/last-scanned + Scan/Force-full-rescan/Stop buttons + polling
 │       ├── format-size.ts           # Shared humanized + exact-byte size formatting (spec FR-005b)
 │       ├── state-labels.ts          # Shared DirectoryState -> display label map
 │       └── components/              # Additional shadcn/ui primitives if needed (e.g. badge, progress)

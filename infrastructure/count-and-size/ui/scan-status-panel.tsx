@@ -1,6 +1,6 @@
 'use client';
 
-import { ScanLine } from 'lucide-react';
+import { RefreshCw, ScanLine } from 'lucide-react';
 import { Button } from '@/infrastructure/ui/components/button';
 import { humanizeSize, exactBytesLabel } from './format-size';
 import { formatDateTime } from './format-date';
@@ -11,11 +11,13 @@ export function ScanStatusPanel({
   view,
   starting,
   onScan,
+  onForceFullRescan,
   onStop,
 }: {
   view: DirectoryView | null;
   starting: boolean;
   onScan: () => void;
+  onForceFullRescan: () => void;
   onStop: () => void;
 }) {
   return (
@@ -23,6 +25,16 @@ export function ScanStatusPanel({
       <Button variant="outline" size="sm" disabled={starting} onClick={onScan}>
         <ScanLine className="size-4" aria-hidden="true" />
         Scan
+      </Button>
+      <Button
+        variant="outline"
+        size="sm"
+        disabled={starting}
+        onClick={onForceFullRescan}
+        title="Ignore existing results and rescan the entire subtree from scratch"
+      >
+        <RefreshCw className="size-4" aria-hidden="true" />
+        Force full rescan
       </Button>
       {view?.state === 'scanning' && (
         <Button variant="outline" size="sm" onClick={onStop}>

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import type { DirectoryView } from '@/domain/count-and-size/derive-directory-view';
+import type { ScanMode } from '@/domain/count-and-size/scan-stack';
 
 const POLL_INTERVAL_MS = 2000;
 
@@ -59,13 +60,13 @@ export function useDirectoryStatus(currentPath: string) {
     };
   }, [view?.state, currentPath]);
 
-  const scan = async () => {
+  const scan = async (mode?: ScanMode) => {
     setStarting(true);
     try {
       await fetch('/api/count-and-size/scan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path: currentPath }),
+        body: JSON.stringify({ path: currentPath, mode }),
       });
       applyStatus(await fetchStatus(currentPath));
     } finally {

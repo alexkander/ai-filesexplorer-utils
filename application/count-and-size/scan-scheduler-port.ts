@@ -1,11 +1,14 @@
+import type { ScanMode } from '@/domain/count-and-size/scan-stack';
+
 /**
  * Lets application-layer use cases trigger/stop the background scan worker
  * without depending on infrastructure directly (Constitution Principle II).
  */
 export interface ScanSchedulerPort {
   /** Push `path` onto the pending stack; its row must already exist
-   * (ScanRepositoryPort.upsertPending) before calling this. */
-  enqueue(path: string): void;
+   * (ScanRepositoryPort.upsertPending) before calling this. `doneSet` is
+   * only meaningful for `mode: 'incremental'` (research.md Decision 10). */
+  enqueue(path: string, mode: ScanMode, doneSet?: ReadonlySet<string>): void;
   /**
    * Stops every in-flight/queued path that is `rootPath` itself or a
    * descendant of it — scoped to the subtree the caller cares about, not

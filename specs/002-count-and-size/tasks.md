@@ -392,6 +392,73 @@ alongside humanized sizes for both files and directories.
 
 ---
 
+## Phase 8: Incremental Scan Default + Force Full Rescan (revision)
+
+**Purpose**: Split the single always-full "Scan" action into an incremental
+default (skips subtree paths already Completed-and-not-incomplete) plus a new
+explicit "Force full rescan" action that keeps the old always-rescan behavior.
+Spec updated with revised FR-021, new FR-021a/FR-021b, revised User Story 2
+acceptance scenarios 5/6 + new 5a/5b/5c, new SC-008. Design: research.md
+Decisions 10–11, data-model.md "Done-subtree set" section.
+
+- [x] T047 [P] Create `domain/count-and-size/derive-done-set.ts`: pure
+      `deriveDoneSet(nodes: DirectoryScanNode[]): Set<string>` — bottom-up over
+      the subtree (leaves first, via `parentPath`), a path is "done" iff its own
+      `ownOutcome === 'done'`, `hasUnreadableEntries === false`, and every child
+      path present in `nodes` is itself "done" (data-model.md "Done-subtree
+      set"; spec FR-021). (Depends on T005.)
+- [x] T048 Update `domain/count-and-size/scan-stack.ts`: change the stack's
+      element type from a bare path `string` to
+      `{ path: string; mode: 'incremental' | 'full'; doneSet?: ReadonlySet<string> }`
+      (data-model.md `ScanStackEntry`); `push`/`pop`/`contains` operate on the
+      new shape (`contains` compares by `.path`). (Depends on T008.)
+- [x] T049 Update `application/count-and-size/start-scan.ts`: add a
+      `mode: 'incremental' | 'full'` parameter (default `'incremental'`). For
+      `'full'`, unchanged existing behavior. For `'incremental'`, call
+      `scanRepository.getSubtree(path)`, run it through `deriveDoneSet` (T047);
+      if `path` itself is already in the resulting set, return without calling
+      `upsertPending`/`enqueue` (nothing outstanding); otherwise call
+      `upsertPending` as before and
+      `scheduler.enqueue({ path, mode:     'incremental', doneSet })`
+      (research.md Decision 10). (Depends on T026, T047.)
+- [x] T050 Update `application/count-and-size/process-directory.ts`: accept the
+      popped `ScanStackEntry`'s `mode`/`doneSet` alongside `path`. When pushing
+      each discovered subdirectory child for the caller to enqueue: if
+      `mode === 'incremental'` and `doneSet?.has(childPath)`, skip it entirely
+      (no `upsertPending`, not returned as a child to enqueue); otherwise call
+      `upsertPending` and include it, carrying the same `mode`/`doneSet` forward
+      unchanged. `mode: 'full'` children are always included, exactly as before
+      this revision. (Depends on T024, T048.)
+- [x] T051 Update `infrastructure/count-and-size/scan-worker.ts`: `enqueue`
+      takes a `ScanStackEntry` (or `path` + `mode` + optional `doneSet`) instead
+      of a bare path; the pop/process/push loop threads the entry's `mode`/
+      `doneSet` into `process-directory.ts` (T050) and onto whatever child
+      entries it returns. (Depends on T025, T048, T050.)
+- [x] T052 [P] Update `app/api/count-and-size/scan/route.ts`: read an optional
+      `mode` field from the request body (`'incremental' | 'full'`, default
+      `'incremental'` if absent or invalid), pass it through to `start-scan.ts`
+      (T049) (contracts/count-and-size-api-contract.md `POST /scan`). (Depends
+      on T027, T049.)
+- [x] T053 Update `infrastructure/count-and-size/ui/use-directory-status.ts`:
+      `scan()` accepts an optional `mode` argument and includes it in the
+      `POST     /api/count-and-size/scan` body when provided (omitted → server
+      default `'incremental'`). (Depends on T028.)
+- [x] T054 Update `infrastructure/count-and-size/ui/scan-status-panel.tsx`: add
+      a "Force full rescan" button next to "Scan", calling `scan('full')`
+      (T053); same enabled/disabled rule "Scan" already has
+      (`disabled={starting}` — only while its own request is in flight, not
+      merely because `state ===     "scanning"`; spec FR-021b). The existing
+      "Scan" button's label/behavior is otherwise unchanged (calls `scan()` with
+      no mode, i.e. incremental). (Depends on T034, T053.)
+
+**Checkpoint**: Re-run `quickstart.md` steps 13–15 (local dev) and step 6
+(Docker prod, post-crash resume) — incremental "Scan" is a no-op when already
+complete, only redoes changed/outstanding parts otherwise, "Force full rescan"
+still redoes everything, and a post-crash "Scan" resumes only what the crash
+left Stopped.
+
+---
+
 ## Dependencies & Execution Order
 
 ### Phase Dependencies
@@ -406,6 +473,10 @@ alongside humanized sizes for both files and directories.
 - **User Story 3 (Phase 5)**: Depends on Foundational and on US2's worker
   (`scan-worker.ts`, `scan-status-panel.tsx`) — implement after US2.
 - **Polish (Phase 6)**: Depends on all three user stories being complete.
+- **Incremental Scan Default + Force Full Rescan (Phase 8)**: Depends on Phase
+  4/5 (`start-scan.ts`, `process-directory.ts`, `scan-worker.ts`,
+  `scan-status-panel.tsx` all already exist) — this phase edits them in place,
+  same pattern as Phase 7.
 
 ### Within Each User Story
 

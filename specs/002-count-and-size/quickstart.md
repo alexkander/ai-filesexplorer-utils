@@ -70,10 +70,32 @@ Run after implementation, on branch `002-count-and-size`.
     shows Scanning (queued) but its actual file counts stay at 0 until the first
     scan (and this one, once its turn comes) finishes — confirms scans are
     serialized, not concurrent.
-13. **Rescanning overwrites** (FR-021): once a directory is Completed, press
-    "Scan" on it again. It goes back through Scanning to Completed; previous
-    numbers aren't just kept as-is (create/delete a file in the fixture between
-    runs to see the count actually change).
+13. **Incremental rescan is a no-op when already complete** (FR-021): once a
+    directory is Completed and not flagged incomplete, press "Scan" on it again.
+    The state should not move back through Scanning — nothing is re-processed
+    and the existing numbers/timestamp are unchanged (unlike the old
+    always-rescan behavior).
+14. **Incremental rescan only redoes outstanding parts** (FR-021, Acceptance
+    Scenario 5a): before the fixture's first scan, `chmod 000` one specific
+    subdirectory inside it (the directory itself, not just a file in it) so
+    its own procedure ends in Error; scan the fixture root — that
+    subdirectory shows Error and the root is flagged incomplete, while
+    sibling subdirectories show Completed. Restore that subdirectory's
+    permissions, then press "Scan" on the fixture root again. Only the
+    previously-erroring subdirectory (plus the root, to recompute totals)
+    should move through Scanning — sibling subdirectories that were already
+    Completed-and-not-incomplete should not flicker through Scanning again.
+    Once done, that subdirectory's contents are counted and the root is no
+    longer flagged incomplete. (Note: this incremental scan has no
+    filesystem-change detection — a subdirectory that stays
+    Completed-and-not-incomplete is never revisited even if its on-disk
+    contents change later; that's what "Force full rescan" in step 15 is
+    for.)
+15. **Force full rescan redoes everything** (FR-021a, FR-021b): on the same
+    already-Completed fixture, press "Force full rescan" instead of "Scan".
+    Every subdirectory moves back through Scanning to Completed, exactly like
+    the old FR-021 behavior — confirms the escape hatch still works and is a
+    distinct action from the now-incremental default "Scan" button.
 
 ## 2. Docker dev (`./scripts/dev.sh`)
 
@@ -101,7 +123,15 @@ This environment is the one `research.md` Decision 7 specifically targets:
    not a graceful stop) to simulate a crash. Bring it back up with
    `./scripts/prod.sh`. The directory that was scanning should now show Stopped,
    not stuck showing Scanning forever and not silently resumed.
-6. `./scripts/prod-down.sh` when done.
+6. **Incremental scan resumes an interrupted run** (research.md Decision 10):
+   immediately after step 5, press the default "Scan" button on the same root
+   again (not "Force full rescan"). Only the subdirectories left Stopped by the
+   crash should move through Scanning — any subdirectory that had already
+   reached Completed-and-not-incomplete before the kill should stay as-is,
+   confirming the "done set" a fresh scan computes correctly reflects the
+   post-restart, reconciled state rather than anything cached from before the
+   crash.
+7. `./scripts/prod-down.sh` when done.
 
 ## Done when
 

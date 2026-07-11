@@ -326,3 +326,79 @@ feature 001-dashboard-shell.
 **Alternatives considered**: One combined `CountAndSizePort` covering both
 filesystem and persistence (rejected — conflates two independently substitutable
 concerns; interface segregation, Principle III).
+
+## Decision 10: Incremental scan via a per-invocation "done set", not a persisted or cached one
+
+**Decision**: `startScan` gains a `mode: 'incremental' | 'full'` parameter
+(default `'incremental'`, spec FR-021/FR-021a). For `mode: 'full'`, behavior is
+unchanged from Decision 1/9 — always `upsertPending` + enqueue every node,
+unconditionally. For `mode: 'incremental'`: at the moment `startScan` runs, it
+calls the existing `ScanRepositoryPort.getSubtree(path)` once (the same method
+`get-directory-status.ts` already uses — no new port method needed), and a new
+pure function in `domain/count-and-size/` (`deriveDoneSet(nodes)`) walks that
+subtree bottom-up to compute the set of paths whose own subtree is fully `done`
+and not incomplete (own `ownOutcome === 'done'`,
+`hasUnreadableEntries === false`, and every descendant recursively the same).
+That `Set<string>` is attached to the `ScanStack` entry pushed for this run
+(entries become `{ path, mode, doneSet? }` instead of a bare `string`) and
+threaded unchanged through every child entry `processDirectory` pushes while
+unwinding this specific run: a discovered child already in `doneSet` is left
+alone (no `upsertPending`, not enqueued); everything else is (re)enqueued
+exactly as `mode: 'full'` would.
+
+**Rationale**: Reuses `getSubtree`'s existing recursive CTE (Decision 1) rather
+than adding a second aggregation path or a new port method. Computing the set
+once per `startScan` call and carrying it immutably through that run's stack
+entries — rather than in a module-level/singleton variable on `scan-worker.ts` —
+means: (a) two interleaved runs on the same global LIFO stack (Decision 2) never
+see each other's `doneSet`, so one root's incremental scan can't accidentally
+skip a path that only looks done because of a different root's in-flight
+results; (b) nothing needs invalidating when the worker's own module state
+resets on a process restart, since the set is never held there in the first
+place — the next `startScan` call simply reads whatever `directory_scan_nodes`
+says at that moment, which already reflects FR-019's restart reconciliation
+(leftover `pending` rows flipped to `stopped`). A
+`stopped`/`error`/still-`pending` path is therefore never in the `doneSet` and
+gets picked back up automatically — no special-cased "resume after crash" logic
+is needed on top of the ordinary incremental path (spec Assumptions, SC-008).
+
+**Alternatives considered**: A per-child `getSubtree`/status lookup as each
+directory is discovered during traversal (rejected — turns one O(subtree) query
+per `startScan` call into one query per directory visited, and `getSubtree` at a
+leaf still re-walks that leaf's own now-trivial subtree, so this is strictly
+more DB work for the same answer). A module-level `Map<rootPath, Set<string>>`
+cache on `scan-worker.ts`, invalidated on scan completion (rejected — extra
+invalidation logic to get wrong, and Constitution Principle I: nothing needs a
+cache surviving longer than the single `startScan` call that produces it).
+Storing a `doneSet`/"skip" flag back onto `DirectoryScanNode` rows (rejected —
+reintroduces Decision 1's rejected write-time propagation for a value that's
+cheap to derive fresh every time and would otherwise need invalidating whenever
+any descendant's row changes).
+
+## Decision 11: Second, explicit "Force full rescan" action in the UI
+
+**Decision**: `scan-status-panel.tsx` gets a second button, "Force full rescan",
+next to the existing "Scan" button — same enabled/disabled rule as "Scan"
+already has (disabled only while its own request is in flight, i.e. the existing
+`starting` state; not disabled merely because `state === 'scanning'` — same as
+"Scan", it relies on server-side enqueueing per FR-013 rather than client-side
+disabling during an active scan; spec FR-021b). It calls the same
+`use-directory-status.ts` `scan()` function with `mode: 'full'` explicitly; the
+existing "Scan" button keeps calling it with no `mode` (or `mode: 'incremental'`
+explicitly — equivalent, since that's the default), so its label and behavior
+for the common case are unchanged from before this revision. The per-row scan
+trigger in `directory-browser.tsx` (Decision 5c) is left as-is — it keeps
+calling `POST /scan` with no `mode`, i.e. always incremental; no
+force-full-rescan control is added at the row level in this pass (spec FR-021's
+scope note).
+
+**Rationale**: Explicit product decision (see spec.md Clarifications, Session
+2026-07-11 revision) — the common case (re-checking a directory, resuming an
+interrupted scan) should do no redundant work by default, while deliberately
+redoing everything must stay one click away, not removed.
+
+**Alternatives considered**: A modifier-key (e.g. Shift+click) on the single
+existing "Scan" button instead of a second button (considered and rejected
+during product discussion — not discoverable without a tooltip, and adds a
+hidden interaction rather than a visible control, for marginal UI space savings
+on a panel that already fits multiple buttons, e.g. "Stop").

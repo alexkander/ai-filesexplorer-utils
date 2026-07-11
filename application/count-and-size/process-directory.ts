@@ -2,6 +2,7 @@ import type { FileSystemPort } from './filesystem-port';
 import type { ScanRepositoryPort } from './scan-repository-port';
 import { shouldIgnoreEntry } from '@/domain/count-and-size/should-ignore-entry';
 import { getDepth } from '@/domain/count-and-size/path-info';
+import type { ScanMode } from '@/domain/count-and-size/scan-stack';
 
 export interface ProcessDirectoryResult {
   childPaths: string[];
@@ -11,12 +12,16 @@ export interface ProcessDirectoryResult {
  * The scan worker's per-node step (spec FR-007, FR-015, FR-016): scans
  * `path`'s direct children, ignoring symlinks/unreadable entries, sums
  * direct file count/size, records this node's own outcome, and enqueues a
- * pending row for each subdirectory.
+ * pending row for each subdirectory — except, in incremental mode, a child
+ * already present in `doneSet` (research.md Decision 10), which is left
+ * untouched and not returned for the caller to enqueue.
  */
 export async function processDirectory(
   path: string,
   fileSystem: FileSystemPort,
   scanRepository: ScanRepositoryPort,
+  mode: ScanMode,
+  doneSet?: ReadonlySet<string>,
 ): Promise<ProcessDirectoryResult> {
   const outcome = await fileSystem.listChildren(path);
 
@@ -44,6 +49,7 @@ export async function processDirectory(
       directFileCount += 1;
       directFileSize += entry.size;
     } else if (entry.kind === 'directory') {
+      if (mode === 'incremental' && doneSet?.has(entry.path)) continue;
       scanRepository.upsertPending(entry.path, path, getDepth(entry.path));
       childPaths.push(entry.path);
     }

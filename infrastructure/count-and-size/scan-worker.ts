@@ -1,4 +1,8 @@
-import { ScanStack } from '@/domain/count-and-size/scan-stack';
+import {
+  ScanStack,
+  type ScanStackEntry,
+  type ScanMode,
+} from '@/domain/count-and-size/scan-stack';
 import { processDirectory } from '@/application/count-and-size/process-directory';
 import type { ScanSchedulerPort } from '@/application/count-and-size/scan-scheduler-port';
 import type { ScanRepositoryPort } from '@/application/count-and-size/scan-repository-port';
@@ -32,8 +36,8 @@ class ScanWorker implements ScanSchedulerPort {
     }
   }
 
-  enqueue(path: string): void {
-    this.stack.push(path);
+  enqueue(path: string, mode: ScanMode, doneSet?: ReadonlySet<string>): void {
+    this.stack.push({ path, mode, doneSet });
     void this.runLoop();
   }
 
@@ -45,7 +49,7 @@ class ScanWorker implements ScanSchedulerPort {
     // Stop on a directory means "stop this whole subtree," not "stop
     // whatever the worker's timing happened to land on."
     for (const item of this.stack.clear()) {
-      if (!isInSubtree(item, rootPath)) this.stack.push(item);
+      if (!isInSubtree(item.path, rootPath)) this.stack.push(item);
     }
   }
 
@@ -57,16 +61,19 @@ class ScanWorker implements ScanSchedulerPort {
     if (this.running) return;
     this.running = true;
     try {
-      let path: string | undefined;
-      while ((path = this.stack.pop())) {
+      let entry: ScanStackEntry | undefined;
+      while ((entry = this.stack.pop())) {
+        const { path, mode, doneSet } = entry;
         this.activePath = path;
         const { childPaths } = await processDirectory(
           path,
           this.fileSystem,
           this.scanRepository,
+          mode,
+          doneSet,
         );
         const stoppedForThisPath = [...this.stoppedRoots].some((root) =>
-          isInSubtree(path!, root),
+          isInSubtree(path, root),
         );
         if (stoppedForThisPath) {
           // These rows were just created as 'pending' by processDirectory
@@ -76,7 +83,8 @@ class ScanWorker implements ScanSchedulerPort {
           if (childPaths.length > 0)
             this.scanRepository.markStopped(childPaths);
         } else {
-          for (const child of childPaths) this.stack.push(child);
+          for (const child of childPaths)
+            this.stack.push({ path: child, mode, doneSet });
         }
       }
     } finally {
