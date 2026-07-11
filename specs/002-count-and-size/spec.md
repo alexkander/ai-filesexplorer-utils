@@ -176,12 +176,13 @@ computed.
    **When** its scan procedure runs, **Then** that entry is skipped and the
    directory is flagged as containing unreadable entries.
 2. **Given** a directory's procedure has one or more descendant procedures
-   still Scanning or Not scanned, **When** the user views that directory,
-   **Then** it shows the Scanning state.
+   that have not yet reached a terminal state (Completed, Error, or
+   Stopped), **When** the user views that directory, **Then** it shows the
+   Scanning state.
 3. **Given** a directory's procedure has a descendant that ended in Error or
-   Stopped, **When** all other descendants finish, **Then** the directory is
-   marked incomplete (not Completed) while still reporting the sum of
-   whatever data is available.
+   Stopped, **When** all other descendants reach a terminal state, **Then**
+   the directory itself reaches the Completed state but is flagged as
+   incomplete, while still reporting the sum of whatever data is available.
 4. **Given** a scan is actively running, **When** the user presses
    Stop/Cancel, **Then** the running procedure and its already-spawned
    in-flight descendant procedures transition to the Stopped state.
@@ -245,11 +246,16 @@ computed.
   its own direct files finish being computed and every one of its descendant
   procedures has completed; there is no separate "queued" indicator distinct
   from Scanning.
-- **FR-011**: A procedure MUST be marked Completed only when it and every one
-  of its descendant procedures completed successfully; if any descendant ends
-  in Error or Stopped, or is otherwise missing/incomplete, the procedure MUST
-  instead be marked incomplete while still reporting the best-effort sum of
-  whatever count/size data is available.
+- **FR-011**: A procedure's state MUST reach Completed once its own direct
+  files finish being computed and every one of its descendant procedures has
+  reached a terminal state (Completed, Error, or Stopped) — regardless of
+  whether every descendant succeeded. Independently of that state, the
+  procedure MUST be flagged as incomplete — while still reporting the
+  best-effort sum of whatever count/size data is available — whenever any
+  descendant did not itself end in a fully successful Completed-and-not-
+  incomplete outcome, or the directory itself has unreadable entries. This
+  incomplete flag is not one of the 5 states from FR-009; it is an additional
+  qualifier shown alongside the Completed state.
 - **FR-012**: The system MUST support only one actively-running scan
   procedure system-wide at any time.
 - **FR-013**: A scan request made while another scan is active or other scans
