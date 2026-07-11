@@ -25,7 +25,7 @@ exercised for real the first time a future feature adds a second `MenuEntry`.
 ## 1. Local dev (`pnpm dev`)
 
 1. `pnpm dev`, open <http://localhost:3000>.
-2. **Shell layout**: a full-width header (~96px tall, check via devtools) is
+2. **Shell layout**: a full-width header (~48px tall, check via devtools) is
    visible at the top; a left sidebar is visible below it. No horizontal
    scrollbar at a browser width of 1280px or more (SC-004).
 3. **Header title**: reads `ai-filesexplorer-utils — Home` (FR-004).
@@ -48,9 +48,13 @@ exercised for real the first time a future feature adds a second `MenuEntry`.
 ## 2. Docker dev (`./scripts/dev.sh`)
 
 1. `./scripts/dev.sh`, open <http://localhost:3000>.
-2. Repeat step 6 above (help popover). This validates that the commit hash
-   resolves correctly when `.git` is available only via the bind-mounted volume,
-   not a `COPY`.
+2. Repeat step 6 above (help popover), with one difference: **the commit hash is
+   expected to show `unknown` here**, not a real hash. The `.git` directory is
+   present via the bind mount, but the `node:22-bookworm-slim` dev image has no
+   `git` binary installed unless you're using the VS Code Dev Container (which
+   adds it via features) — this is pre-existing, intentional behavior (see the
+   Dockerfile's own comment), not something this feature changes. App name and
+   version should still be correct.
 3. `./scripts/dev-down.sh` when done.
 
 ## 3. Docker prod (`./scripts/prod.sh`)
@@ -59,10 +63,11 @@ exercised for real the first time a future feature adds a second `MenuEntry`.
    `docker compose -f docker-compose.prod.yml up --build -d`, rebuilding the
    `builder`/`runner` stages).
 2. Open <http://localhost:3000>.
-3. Repeat step 6 above (help popover). This validates that the commit hash
-   resolves correctly from the `builder` stage's build-time `git rev-parse` (per
-   the `.dockerignore` adjustment in research.md Decision 4), even though the
-   final `runner` image ships no `.git` or source.
+3. Repeat step 6 above (help popover). Here the commit hash **should be a real
+   hash**, matching `git rev-parse --short HEAD` on the host — this validates
+   the `builder` stage's build-time `git rev-parse` (the `.dockerignore`
+   adjustment plus installing `git` via `apk`, research.md Decision 4), even
+   though the final `runner` image ships no `.git`, `git` binary, or source.
 4. Confirm the app still looks and behaves identically to the dev checks above
    (shell layout, sidebar, unmatched-route fallback).
 5. `./scripts/prod-down.sh` when done.

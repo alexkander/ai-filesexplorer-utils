@@ -53,14 +53,34 @@ reason to diverge from the icon set shadcn/ui already assumes).
 **Decision**: Compute the short commit hash (`git rev-parse --short HEAD`,
 wrapped in a try/catch that falls back to the literal string `"unknown"`) inside
 `next.config.ts`, and expose it to the app via Next's `env` config key. To make
-this work in the Docker `builder` stage — which currently does not receive
-`.git` because the root `.dockerignore` excludes it — remove the `.git` line
-from `.dockerignore`. This is a global change (Docker's `.dockerignore` applies
-to the whole build context, not per stage — there is no way to scope it to only
-the `builder` stage), but it stays safe for the shipped image regardless,
-because the `runner` stage's `COPY --from=builder` instructions only ever copy
-`.next/standalone`, `.next/static`, and `public` — never `.git` — so the final
-image stays free of source/git no matter what the build context contains.
+this work in the Docker `builder` stage, two changes were needed (the second one
+only surfaced during hands-on validation, see the note below):
+
+1. Remove the `.git` line from `.dockerignore`, so the `builder` stage's build
+   context actually includes the `.git` directory. This is a global change
+   (Docker's `.dockerignore` applies to the whole build context, not per stage —
+   there is no way to scope it to only the `builder` stage), but it stays safe
+   for the shipped image regardless, because the `runner` stage's
+   `COPY --from=builder` instructions only ever copy `.next/standalone`,
+   `.next/static`, and `public` — never `.git` — so the final image stays free
+   of source/git no matter what the build context contains.
+2. Install the `git` CLI itself in the `base` stage
+   (`RUN apk add --no-cache git`), since `node:22-alpine` doesn't ship it.
+   Having the `.git` directory present is not enough if the `git` binary that
+   reads it isn't installed. The `runner` stage starts fresh from
+   `node:22-alpine` (not from `base`), so this doesn't affect the shipped image
+   either.
+
+**Note (found during `/speckit-implement` T025 E2E validation, not anticipated
+at planning time)**: the initial plan only covered point 1 above, on the
+(incorrect) assumption that `.git` being reachable was the only blocker. Running
+the actual Docker prod build revealed `git rev-parse` still failed with "git:
+not found" — `node:22-alpine` has no `git` binary by default. Point 2 was added
+to fix this. The same binary-availability issue independently affects Docker dev
+(`./scripts/dev.sh`): its `node:22-bookworm-slim` image also has no `git` binary
+unless installed via the VS Code Dev Container's features (per the Dockerfile's
+own comment), so that path intentionally still falls back to `"unknown"` — this
+is pre-existing, documented behavior, not something this feature changes.
 
 **Rationale**: One mechanism, three environments:
 

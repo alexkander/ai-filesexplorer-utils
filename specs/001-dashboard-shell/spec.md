@@ -56,7 +56,7 @@ yet.
 **Acceptance Scenarios**:
 
 1. **Given** the user navigates to the application's root URL, **When** the page
-   finishes loading, **Then** a full-width header of approximately 96px in
+   finishes loading, **Then** a full-width header of approximately 48px in
    height is visible at the top, and a left sidebar is visible in the body below
    it.
 2. **Given** the dashboard shell has loaded, **When** the user looks at the main
@@ -148,7 +148,8 @@ commit hash are present and correct, independent of which route is active.
   of the header and the sidebar — that wraps every route in the application,
   including the Home view and every future tool.
 - **FR-002**: The header MUST span the full width of the viewport and MUST be
-  approximately 96px tall.
+  approximately 48px tall. (Revised down from the original ~96px after visual
+  review of the implemented shell — 96px read as too tall in practice.)
 - **FR-003**: The header MUST show a title on its left side. The application
   name portion of this title MUST be the literal `package.json` name,
   "ai-filesexplorer-utils".

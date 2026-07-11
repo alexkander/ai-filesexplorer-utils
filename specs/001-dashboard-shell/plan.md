@@ -7,7 +7,7 @@
 
 ## Summary
 
-Build the persistent application shell — a full-width, ~96px header and a fixed
+Build the persistent application shell — a full-width, ~48px header and a fixed
 left sidebar — that wraps every route, plus the initial Home placeholder view.
 The header title shows "AppName — Section"; the sidebar starts with a single
 "Home" entry that highlights itself when its route is active; a help icon on the
@@ -56,7 +56,7 @@ split), restructured to introduce `domain/`, `application/`, and
 spec sets no explicit latency target (SC-001 only requires the shell to render
 with no extra user action).
 
-**Constraints**: Header ~96px tall, full viewport width, no centered max-width
+**Constraints**: Header ~48px tall, full viewport width, no centered max-width
 anywhere in the shell (FR-002, FR-014, FR-015); commit-hash resolution must work
 identically across local dev, Docker dev, and Docker prod despite `.git` not
 being present in the Docker build context by default (see research.md, Decision

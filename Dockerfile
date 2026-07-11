@@ -2,6 +2,11 @@
 FROM node:22-alpine AS base
 WORKDIR /app
 RUN corepack enable
+# git is needed by the builder stage (via `deps`) to read the commit hash at
+# build time (next.config.ts); the final `runner` stage below starts fresh
+# from node:22-alpine and never installs it, so the shipped image stays free
+# of git either way.
+RUN apk add --no-cache git
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 
 FROM base AS deps
