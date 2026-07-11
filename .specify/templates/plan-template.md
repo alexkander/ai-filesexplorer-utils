@@ -24,7 +24,8 @@
 
 **Storage**: [if applicable, e.g., PostgreSQL, CoreData, files or N/A]
 
-**Testing**: [e.g., pytest, XCTest, cargo test or NEEDS CLARIFICATION]
+**Testing**: N/A — this project does not use automated tests (Constitution Principle IV). Describe
+manual end-to-end verification steps for this feature instead.
 
 **Target Platform**: [e.g., Linux server, iOS 15+, WASM or NEEDS CLARIFICATION]
 

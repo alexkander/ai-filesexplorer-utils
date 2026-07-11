@@ -1,70 +1,69 @@
 # ai-filesexplorer-utils
 
-Utilidades web para organizar archivos: conteo de archivos por directorio,
-registro de checksums de contenido, sincronización de carpetas, entre otras.
+Web utilities for organizing files: file counts per directory, content checksum
+tracking, folder synchronization, and more.
 
-## Requisitos
+## Requirements
 
 - Node.js 22+
-- [pnpm](https://pnpm.io/) 11+ (o Docker, ver abajo)
+- [pnpm](https://pnpm.io/) 11+ (or Docker, see below)
 
-## Desarrollo local
+## Local development
 
 ```bash
 pnpm install
 pnpm dev
 ```
 
-La app queda disponible en [http://localhost:3000](http://localhost:3000).
+The app is available at [http://localhost:3000](http://localhost:3000).
 
-Otros scripts disponibles:
+Other available scripts:
 
 ```bash
-pnpm build   # build de producción
-pnpm start   # levanta el build de producción
+pnpm build   # production build
+pnpm start   # run the production build
 ```
 
-## Desarrollo con Docker
+## Development with Docker
 
 ```bash
 ./scripts/dev.sh
-# equivalente a: docker compose up --build -d
+# equivalent to: docker compose up --build -d
 
 ./scripts/dev-down.sh
-# equivalente a: docker compose down
+# equivalent to: docker compose down
 ```
 
-El servicio corre con `network_mode: host`, por lo que queda disponible
-directamente en `http://localhost:3000` del host. El código fuente se monta como
-volumen para hot-reload; `node_modules` y `.next` quedan en volúmenes anónimos
-dentro del contenedor para no chocar con los del host.
+The service runs with `network_mode: host`, so it's directly available at
+`http://localhost:3000` on the host. The source code is mounted as a volume for
+hot-reload; `node_modules` and `.next` live in anonymous volumes inside the
+container so they don't clash with the host's.
 
-Este mismo `docker-compose.yml` es el que usa `.devcontainer/devcontainer.json`
-(extensión Dev Containers de VS Code), así que ambas vías de desarrollo en
-contenedor comparten exactamente la misma imagen y configuración — no hay nada
-duplicado entre una y otra.
+This same `docker-compose.yml` is used by `.devcontainer/devcontainer.json` (VS
+Code Dev Containers extension), so both containerized development paths share
+the exact same image and configuration — nothing is duplicated between them.
 
-## Producción con Docker
+## Production with Docker
 
 ```bash
 ./scripts/prod.sh
-# equivalente a: docker compose -f docker-compose.prod.yml up --build -d
+# equivalent to: docker compose -f docker-compose.prod.yml up --build -d
 
 ./scripts/prod-down.sh
-# equivalente a: docker compose -f docker-compose.prod.yml down
+# equivalent to: docker compose -f docker-compose.prod.yml down
 ```
 
-Usa el stage `runner` del `Dockerfile` (build multi-stage), que corre el output
-`standalone` de Next.js: una imagen mínima sin pnpm ni el código fuente
-completo, solo el servidor compilado. Queda expuesto en `http://localhost:3000`
-mapeando el puerto (sin `network_mode: host`, sin bind mounts).
+Uses the `runner` stage of the `Dockerfile` (multi-stage build), which runs
+Next.js's `standalone` output: a minimal image with no pnpm or full source code,
+just the compiled server. It's exposed at `http://localhost:3000` via port
+mapping (no `network_mode: host`, no bind mounts).
 
-## Variables de entorno
+## Environment variables
 
-Actualmente el proyecto no requiere ninguna variable de entorno para funcionar.
+The project currently doesn't require any environment variables to run.
 
-Si se agregan en el futuro, seguir la convención de Next.js:
+If any are added in the future, follow the Next.js convention:
 
-- `.env.local` para valores locales (no se versiona, agregar a `.gitignore`)
-- Prefijo `NEXT_PUBLIC_` solo para variables que deban quedar expuestas al
-  cliente/navegador
+- `.env.local` for local values (not versioned, add to `.gitignore`)
+- `NEXT_PUBLIC_` prefix only for variables that must be exposed to the
+  client/browser

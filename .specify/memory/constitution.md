@@ -1,50 +1,153 @@
-# [PROJECT_NAME] Constitution
-<!-- Example: Spec Constitution, TaskFlow Constitution, etc. -->
+<!--
+Sync Impact Report
+- Version change: (unratified template) → 1.0.0
+- Modified principles: n/a (first ratified version; template placeholders filled)
+- Added sections:
+  - I. Simplicity First (YAGNI)
+  - II. Hexagonal Architecture (Ports & Adapters)
+  - III. SOLID Principles
+  - IV. No Automated Tests — Manual Verification Only
+  - V. Safe-by-Default Destructive Operations
+  - VI. Conventional Commits
+  - Technology & Language Constraints (Section 2)
+  - Development Workflow (Section 3)
+  - Governance
+- Removed sections: none (template placeholders only)
+- Templates requiring updates:
+  - ✅ .specify/templates/plan-template.md (Technical Context "Testing" line updated to point at Principle IV)
+  - ✅ .specify/templates/tasks-template.md ("Tests" guidance line updated to reflect the no-tests principle)
+  - ✅ .specify/templates/spec-template.md (no changes needed — no test-specific content to reconcile)
+  - ✅ CLAUDE.md (already states "no test suite configured"; consistent with Principle IV, no edit required)
+- Follow-up TODOs: none — the English-only conflict flagged at ratification time (app/layout.tsx
+  `lang="es"`, README.md, and Dockerfile comments written in Spanish) has been resolved: all three
+  files were migrated to English in the same change that ratified this constitution.
+-->
+
+# ai-filesexplorer-utils Constitution
 
 ## Core Principles
 
-### [PRINCIPLE_1_NAME]
-<!-- Example: I. Library-First -->
-[PRINCIPLE_1_DESCRIPTION]
-<!-- Example: Every feature starts as a standalone library; Libraries must be self-contained, independently testable, documented; Clear purpose required - no organizational-only libraries -->
+### I. Simplicity First (YAGNI)
 
-### [PRINCIPLE_2_NAME]
-<!-- Example: II. CLI Interface -->
-[PRINCIPLE_2_DESCRIPTION]
-<!-- Example: Every library exposes functionality via CLI; Text in/out protocol: stdin/args → stdout, errors → stderr; Support JSON + human-readable formats -->
+Build only what the current feature actually requires. Abstractions, configuration options,
+plugin points, or generalized frameworks MUST NOT be introduced for hypothetical future needs —
+every abstraction MUST be justified by a concrete requirement that exists today. When a simpler
+solution and a more "flexible" one both satisfy the current requirement, the simpler one MUST be
+chosen; generalize only when a second real use case actually appears.
 
-### [PRINCIPLE_3_NAME]
-<!-- Example: III. Test-First (NON-NEGOTIABLE) -->
-[PRINCIPLE_3_DESCRIPTION]
-<!-- Example: TDD mandatory: Tests written → User approved → Tests fail → Then implement; Red-Green-Refactor cycle strictly enforced -->
+**Rationale**: This is a personal utility app with an open-ended list of file-management tools
+(counting, checksums, diff, merge, and more to come). Premature generalization across tools that
+don't exist yet is the single biggest risk to shipping velocity, and is explicitly rejected by
+the project owner.
 
-### [PRINCIPLE_4_NAME]
-<!-- Example: IV. Integration Testing -->
-[PRINCIPLE_4_DESCRIPTION]
-<!-- Example: Focus areas requiring integration tests: New library contract tests, Contract changes, Inter-service communication, Shared schemas -->
+### II. Hexagonal Architecture (Ports & Adapters)
 
-### [PRINCIPLE_5_NAME]
-<!-- Example: V. Observability, VI. Versioning & Breaking Changes, VII. Simplicity -->
-[PRINCIPLE_5_DESCRIPTION]
-<!-- Example: Text I/O ensures debuggability; Structured logging required; Or: MAJOR.MINOR.BUILD format; Or: Start simple, YAGNI principles -->
+Domain logic (e.g., duplicate-detection rules, checksum comparison, diff/merge algorithms,
+counting/aggregation rules) MUST live in a framework-agnostic `domain/` layer with no imports of
+Next.js, React, or direct Node.js I/O APIs (`fs`, `path` usage beyond types is an infrastructure
+concern). Use-case orchestration MUST live in an `application/` layer that depends only on
+`domain/` and on ports (TypeScript interfaces) it defines for anything crossing a system boundary
+(filesystem access, checksum computation, etc.). Concrete implementations of those ports — Node
+`fs` access, Next.js Route Handlers/Server Actions, shadcn/ui + Tailwind components — MUST live in
+an `infrastructure/` layer. Files under `app/` (Next.js App Router) MUST stay thin: they call into
+`application/` use cases and render `infrastructure/ui` components, and MUST NOT contain domain
+logic themselves. The dependency direction is always inward: `infrastructure` → `application` →
+`domain`, never the reverse.
 
-## [SECTION_2_NAME]
-<!-- Example: Additional Constraints, Security Requirements, Performance Standards, etc. -->
+**Rationale**: Since Principle IV rules out automated tests, the usual "testability" justification
+for hexagonal architecture doesn't apply here. The real payoff is (a) replaceability — the
+filesystem adapter, the checksum algorithm, or the UI layer can be swapped without touching
+domain rules — and (b) safety — routing every filesystem mutation through a small set of explicit
+ports makes it possible to consistently enforce Principle V (dry-run/confirmation) in one place
+rather than scattered across UI code.
 
-[SECTION_2_CONTENT]
-<!-- Example: Technology stack requirements, compliance standards, deployment policies, etc. -->
+### III. SOLID Principles
 
-## [SECTION_3_NAME]
-<!-- Example: Development Workflow, Review Process, Quality Gates, etc. -->
+Domain and application code MUST follow SOLID: each module/class/function has a single
+responsibility; new behavior is added by introducing new adapters/strategies rather than editing
+existing ones (open/closed); any implementation behind a port MUST be substitutable for another
+without breaking callers (Liskov); ports MUST stay small and specific to one capability rather
+than becoming catch-all interfaces (interface segregation); application and domain code MUST
+depend on ports (abstractions), never on concrete infrastructure such as Node's `fs` module
+directly (dependency inversion).
 
-[SECTION_3_CONTENT]
-<!-- Example: Code review requirements, testing gates, deployment approval process, etc. -->
+**Rationale**: Explicitly required by the project owner, and it reinforces Principle II — SOLID is
+what keeps the ports/adapters boundary from eroding as more file-management tools are added.
+
+### IV. No Automated Tests — Manual Verification Only
+
+This project MUST NOT include automated test suites, test frameworks, or test-only dependencies
+(no unit/integration/e2e tests, no test runner in `package.json`). Correctness is verified
+manually: run the app and exercise the changed feature end-to-end before considering work done.
+Any spec, plan, or task generated by Speckit workflows MUST omit "Tests" sections/phases or mark
+them not applicable — they MUST NOT produce test tasks or contract/integration test files.
+
+**Rationale**: Explicit, deliberate choice by the project owner to optimize a personal utility
+project for velocity over test-suite upkeep. This is a hard override of the Speckit templates'
+default assumption that tests are commonly included.
+
+### V. Safe-by-Default Destructive Operations
+
+Any operation that deletes, moves, overwrites, or merges files or folders MUST provide a
+dry-run/preview mode that reports exactly what would change without touching the filesystem, and
+MUST require explicit user confirmation of the previewed changes before it is allowed to execute
+for real. This applies without exception to every current and future destructive tool (duplicate
+cleanup, folder merge, folder diff-apply, and anything added later).
+
+**Rationale**: The application operates directly on the user's real, irreplaceable files. Given
+there is no automated test safety net (Principle IV), the dry-run + confirmation gate is the
+primary defense against data loss from a bug in a merge/dedupe/diff algorithm.
+
+### VI. Conventional Commits
+
+Every commit message MUST follow the Conventional Commits specification
+(`type(scope): description`, e.g. `feat:`, `fix:`, `refactor:`, `docs:`, `chore:`), written in
+English.
+
+**Rationale**: Explicitly required by the project owner; keeps history scannable and enables
+changelog generation even without a formal release process.
+
+## Technology & Language Constraints
+
+- **Framework**: Next.js (App Router) with React and TypeScript in `strict` mode.
+- **UI**: shadcn/ui components styled with Tailwind CSS. No other component library or CSS
+  framework MUST be introduced without a constitution amendment.
+- **Package manager**: pnpm, as already configured (`packageManager` field, `pnpm-workspace.yaml`).
+- **Repository language**: English, everywhere in the repository — source code, identifiers,
+  comments, commit messages, documentation, and all Speckit specs/plans/tasks/constitution files,
+  as well as the shipped UI copy. This applies regardless of the language used to converse with an
+  AI assistant while working on the repo. (See the Sync Impact Report TODO regarding existing
+  Spanish content that predates this rule.)
+- **Deployment model**: single-user, self-hosted. No authentication, authorization, or
+  multi-tenancy MUST be added; the app assumes it runs under the control of its one operator, with
+  direct access to the local filesystem it manages.
+
+## Development Workflow
+
+- Husky + lint-staged run ESLint (`--fix`) and Prettier on staged files on every commit
+  (`.husky/pre-commit`); this MUST NOT be bypassed (e.g. no `--no-verify`) except for a
+  documented, user-approved reason.
+- Commit messages MUST follow Principle VI (Conventional Commits).
+- There are no automated CI test gates (Principle IV). Manual end-to-end verification of the
+  changed feature is required before a change is considered complete.
+- Every `/speckit-plan` run MUST include a Constitution Check gate that evaluates the plan against
+  the principles above before Phase 0 research, and again after Phase 1 design.
 
 ## Governance
-<!-- Example: Constitution supersedes all other practices; Amendments require documentation, approval, migration plan -->
 
-[GOVERNANCE_RULES]
-<!-- Example: All PRs/reviews must verify compliance; Complexity must be justified; Use [GUIDANCE_FILE] for runtime development guidance -->
+This constitution supersedes any other informal or ad-hoc practice for this repository.
 
-**Version**: [CONSTITUTION_VERSION] | **Ratified**: [RATIFICATION_DATE] | **Last Amended**: [LAST_AMENDED_DATE]
-<!-- Example: Version: 2.1.1 | Ratified: 2025-06-13 | Last Amended: 2025-07-16 -->
+**Amendment procedure**: Amendments are made by editing this file directly (or via PR), and MUST
+include an updated Sync Impact Report (as an HTML comment at the top of this file) describing what
+changed and which dependent templates/docs were checked or updated.
+
+**Versioning policy**: This file follows semantic versioning:
+- **MAJOR**: Backward-incompatible governance changes, or removal/redefinition of an existing
+  principle.
+- **MINOR**: A new principle or section is added, or existing guidance is materially expanded.
+- **PATCH**: Wording clarifications, typo fixes, and other non-semantic refinements.
+
+**Compliance review**: Any deviation from a principle above MUST be justified in the relevant
+plan's Complexity Tracking table, or the simpler, compliant alternative MUST be used instead.
+
+**Version**: 1.0.0 | **Ratified**: 2026-07-11 | **Last Amended**: 2026-07-11
