@@ -30,9 +30,10 @@ independent implementation and testing of each story.
 constitution's Technology & Language Constraints and not yet present
 (research.md Decision 1).
 
-- [ ] T001 Add `tailwindcss` and `@tailwindcss/postcss` to `package.json`
-      devDependencies and create `postcss.config.mjs` at the repo root wiring
-      the Tailwind PostCSS plugin.
+- [ ] T001 Run `pnpm add -D tailwindcss @tailwindcss/postcss` (updates
+      `package.json` and `pnpm-lock.yaml` together — never hand-edit
+      `package.json` alone) and create `postcss.config.mjs` at the repo root
+      wiring the Tailwind PostCSS plugin.
 - [ ] T002 Create `app/globals.css` with the Tailwind CSS import, and import it
       from `app/layout.tsx`. (Depends on T001.)
 - [ ] T003 Initialize shadcn/ui: run its CLI to create `components.json` and
@@ -150,9 +151,10 @@ or Escape.
 
 ### Implementation for User Story 3
 
-- [ ] T015 [US3] Update `package.json`: add `"version": "0.1.0"` and add
-      `lucide-react` to dependencies (spec Clarifications — version source;
-      research.md Decision 3).
+- [ ] T015 [US3] Run `pnpm add lucide-react` (updates `package.json` and
+      `pnpm-lock.yaml` together), then manually add `"version": "0.1.0"` to
+      `package.json` (spec Clarifications — version source; research.md Decision
+      3).
 - [ ] T016 [US3] Add shadcn/ui's `Popover` and `Button` components via its CLI
       into `infrastructure/ui/components/` (research.md Decision 2). (Depends on
       T003.)
@@ -168,10 +170,12 @@ or Escape.
       (`git rev-parse --short HEAD`, wrapped in try/catch falling back to
       `"unknown"`) and expose it via the `env` config key as
       `NEXT_PUBLIC_COMMIT_HASH` (research.md Decision 4).
-- [ ] T020 [P] [US3] Adjust `.dockerignore` so the Docker `builder` stage's
-      build context includes `.git` (needed for T019's `git rev-parse` to
-      succeed there), while the `runner` stage still never copies `.git` into
-      the shipped image (research.md Decision 4).
+- [ ] T020 [P] [US3] Remove the `.git` line from `.dockerignore` (a global
+      change — Docker's `.dockerignore` isn't scoped per stage) so the `builder`
+      stage's build context includes `.git`, needed for T019's `git rev-parse`
+      to succeed there. This stays safe for the shipped image because the
+      `runner` stage's `COPY --from=builder` instructions never reference `.git`
+      (research.md Decision 4).
 - [ ] T021 [US3] Create `infrastructure/build-info/build-info-adapter.ts`
       implementing `BuildInfoPort`: `appName` is the literal constant
       `"ai-filesexplorer-utils"`, `version` comes from a static import of

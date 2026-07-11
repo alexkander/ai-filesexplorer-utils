@@ -16,7 +16,10 @@ short commit hash. This is also the first feature to introduce Tailwind CSS and
 shadcn/ui to the project (mandated by the constitution's Technology & Language
 Constraints, not yet set up), and the first to apply the constitution's
 hexagonal architecture (`domain/` / `application/` / `infrastructure/`) to
-`app/`.
+`app/`. Both the sidebar's menu list and the header's right-side actions area
+are built as open extension points: this feature ships each with the minimum
+content needed to be useful (one entry, one action), and expects their contents
+to keep changing across future specs as new tools and header actions are added.
 
 ## Technical Context
 
@@ -59,9 +62,11 @@ identically across local dev, Docker dev, and Docker prod despite `.git` not
 being present in the Docker build context by default (see research.md, Decision
 4); single-user/no-auth per the constitution's deployment model.
 
-**Scale/Scope**: Single user, one sidebar entry ("Home") today, designed so
-future tools are added by appending to a static list (SC-005) without touching
-the header or other entries.
+**Scale/Scope**: Single user, one sidebar entry ("Home") and one header action
+(help icon) today. Both lists are designed to grow across future specs — new
+tools by appending to the sidebar's static list (SC-005), new header actions by
+adding to the header's right-side container — without touching the header
+layout, sidebar layout, or existing entries/actions either way.
 
 ## Constitution Check
 

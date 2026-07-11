@@ -6,6 +6,15 @@ environment because commit-hash resolution differs across them (see
 [research.md](./research.md), Decision 4) — all three are worth checking at
 least once.
 
+## Note on SC-005
+
+SC-005 ("a new tool can be introduced to the sidebar without requiring changes
+to the header or existing entries") isn't checked in the steps below — this
+feature ships with a single sidebar entry ("Home"), so there's no second tool
+yet to prove the claim with. It's backed by design
+(`contracts/menu-entry-contract.md`), not by an executed check here; it will be
+exercised for real the first time a future feature adds a second `MenuEntry`.
+
 ## Prerequisites
 
 - `pnpm install` has been run.

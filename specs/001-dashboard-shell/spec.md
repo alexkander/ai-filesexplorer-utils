@@ -157,8 +157,8 @@ commit hash are present and correct, independent of which route is active.
   matches a known section, as a single line in the form "AppName — Section"
   (em-dash separated, e.g. "ai-filesexplorer-utils — Home").
 - **FR-005**: The header MUST provide a right-side area capable of holding zero
-  or more optional actions, to which new actions can be added over time without
-  redesigning the header.
+  or more optional actions; further actions are expected to be added by future
+  features over time, without redesigning the header.
 - **FR-006**: The first (and currently only) right-side header action MUST be a
   help icon.
 - **FR-007**: Clicking the help icon MUST open a dismissible popover/panel
@@ -242,3 +242,10 @@ commit hash are present and correct, independent of which route is active.
 - The help icon's info is revealed via a click-triggered, dismissible popover
   rather than a hover tooltip, so the same interaction works consistently across
   desktop and touch input.
+- Both extension points this feature establishes — the header's right-side
+  actions area (FR-005/FR-006) and the sidebar's menu entries list
+  (FR-009/FR-010) — are intentionally minimal today (one action, one entry).
+  Their contents are expected to keep changing over multiple future specs as new
+  tools and header actions are defined; this feature's job is only to make sure
+  either list can grow without redesigning the header or sidebar, not to build
+  out their eventual contents.

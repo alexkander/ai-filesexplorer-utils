@@ -54,11 +54,13 @@ reason to diverge from the icon set shadcn/ui already assumes).
 wrapped in a try/catch that falls back to the literal string `"unknown"`) inside
 `next.config.ts`, and expose it to the app via Next's `env` config key. To make
 this work in the Docker `builder` stage — which currently does not receive
-`.git` because the root `.dockerignore` excludes it — scope that exclusion so
-`.git` reaches the `builder` stage's build context but is still never copied
-into the final `runner` image (the `runner` stage only ever copies
-`.next/standalone`, `.next/static`, and `public`, so its own image stays free of
-source/git either way).
+`.git` because the root `.dockerignore` excludes it — remove the `.git` line
+from `.dockerignore`. This is a global change (Docker's `.dockerignore` applies
+to the whole build context, not per stage — there is no way to scope it to only
+the `builder` stage), but it stays safe for the shipped image regardless,
+because the `runner` stage's `COPY --from=builder` instructions only ever copy
+`.next/standalone`, `.next/static`, and `public` — never `.git` — so the final
+image stays free of source/git no matter what the build context contains.
 
 **Rationale**: One mechanism, three environments:
 
@@ -70,9 +72,11 @@ source/git either way).
   by it).
 - **Docker prod (`./scripts/prod.sh`)**: the `builder` stage runs
   `pnpm run build` from a `COPY . .` of the build context, which is what
-  `.dockerignore` currently blocks `.git` from reaching. Adjusting the ignore
-  rule is the only change needed; the shipped `runner` image is unaffected since
-  it never copies `.git`.
+  `.dockerignore` currently blocks `.git` from reaching. Removing that one
+  `.dockerignore` line is the only change needed; it also makes `.git` visible
+  to the `dev`/`deps` stages' build context, which is harmless (the `dev` stage
+  already gets `.git` at runtime via its bind mount anyway), and the shipped
+  `runner` image is unaffected either way since it never copies `.git`.
 
 Computing the hash at `next build`/`next dev` invocation time (not at
 request/runtime) also matches the spec's Assumption that build info is "sourced
