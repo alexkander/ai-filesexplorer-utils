@@ -1,8 +1,7 @@
 # Specification Quality Checklist: Count and Size Tool
 
-**Purpose**: Validate specification completeness and quality before proceeding to planning
-**Created**: 2026-07-11
-**Feature**: [spec.md](../spec.md)
+**Purpose**: Validate specification completeness and quality before proceeding
+to planning **Created**: 2026-07-11 **Feature**: [spec.md](../spec.md)
 
 ## Content Quality
 
@@ -32,9 +31,9 @@
 ## Notes
 
 - All three clarification points raised during specification (persistence
-  mechanism, Stop control, rescan behavior) were resolved with the user
-  before writing the spec — see the Clarifications section in `spec.md`.
-- The "SQLite" mention in the Assumptions section documents a *decision* the
+  mechanism, Stop control, rescan behavior) were resolved with the user before
+  writing the spec — see the Clarifications section in `spec.md`.
+- The "SQLite" mention in the Assumptions section documents a _decision_ the
   user made when asked to propose persistence options, not an implementation
   detail leaking in unprompted; it is scoped to explain durability guarantees
   the requirements (FR-022, SC-006) depend on.

@@ -1,8 +1,7 @@
 # Contract: FileSystemPort
 
-The port `application/count-and-size/` use cases depend on for any read of
-the real filesystem. Defined in
-`application/count-and-size/filesystem-port.ts`.
+The port `application/count-and-size/` use cases depend on for any read of the
+real filesystem. Defined in `application/count-and-size/filesystem-port.ts`.
 
 ## Shape
 
@@ -34,14 +33,13 @@ interface FileSystemPort {
 
 ## Use cases that depend on this port
 
-- `application/count-and-size/list-directory.ts` — shows the browsing
-  listing (FR-001/FR-001a). Uses raw `kind` directly: files are shown
-  non-clickable, directories clickable, symlinks/unreadable entries shown but
-  inert (spec doesn't require hiding them from browsing — only from scan
-  totals).
-- `application/count-and-size/process-directory.ts` — the scan worker's
-  per-node step (FR-007). Applies `domain/count-and-size/shouldIgnoreEntry`
-  to each `RawEntry`: symlinks are skipped and never contribute to
+- `application/count-and-size/list-directory.ts` — shows the browsing listing
+  (FR-001/FR-001a). Uses raw `kind` directly: files are shown non-clickable,
+  directories clickable, symlinks/unreadable entries shown but inert (spec
+  doesn't require hiding them from browsing — only from scan totals).
+- `application/count-and-size/process-directory.ts` — the scan worker's per-node
+  step (FR-007). Applies `domain/count-and-size/shouldIgnoreEntry` to each
+  `RawEntry`: symlinks are skipped and never contribute to
   `directFileCount`/`directFileSize`; unreadable entries are skipped and set
   `hasUnreadableEntries = true`; only `kind === 'file'` entries contribute to
   the direct count/size; `kind === 'directory'` entries become new
@@ -61,9 +59,9 @@ interface FileSystemPort {
 
 - `listChildren` never throws for a normal permission error — failures are
   always represented in the return value (`ok: false`, or a per-entry
-  `'unreadable'` kind), never a rejected promise, except for truly
-  unexpected errors (e.g. out of memory).
+  `'unreadable'` kind), never a rejected promise, except for truly unexpected
+  errors (e.g. out of memory).
 - `listChildren` never follows symlinks — a symlinked directory always comes
   back as `kind: 'symlink'`, never `'directory'`.
-- Entries are returned in filesystem enumeration order (no sorting
-  guarantee); sorting for display is the listing use case's responsibility.
+- Entries are returned in filesystem enumeration order (no sorting guarantee);
+  sorting for display is the listing use case's responsibility.

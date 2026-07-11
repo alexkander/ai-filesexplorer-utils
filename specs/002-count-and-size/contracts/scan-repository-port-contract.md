@@ -37,7 +37,7 @@ interface ScanRepositoryPort {
           directFileSize: number;
           hasUnreadableEntries: boolean;
         }
-      | { outcome: 'error'; errorMessage: string }
+      | { outcome: 'error'; errorMessage: string },
   ): void;
 
   // Mark a specific set of paths (the active path + its already-created
@@ -55,11 +55,6 @@ interface ScanRepositoryPort {
   // cases to know which descendants already have rows.
   getSubtree(path: string): DirectoryScanNode[]; // empty array if `path`
   // has no row (not_scanned)
-
-  // Fetch just the direct children rows (one level) of `path`, keyed by
-  // path — used by list-directory.ts to answer "hasScanData" per listed
-  // subdirectory without pulling each one's whole subtree individually.
-  getDirectChildren(path: string): Map<string, DirectoryScanNode>;
 }
 ```
 
@@ -70,10 +65,12 @@ interface ScanRepositoryPort {
 - `start-scan.ts`: `upsertPending` for the requested root path.
 - `stop-scan.ts`: `markStopped` for the active path and any already-`pending`
   descendants found via `getSubtree`.
-- `get-directory-status.ts` / `list-directory.ts`: `getSubtree` /
-  `getDirectChildren`, feeding `domain/count-and-size/derive-directory-view.ts`.
-- The worker singleton's startup routine: `findAllPendingPaths` +
-  `markStopped` (FR-019).
+- `get-directory-status.ts` / `list-directory.ts`: both call `getSubtree` — once
+  for the viewed directory, and once per listed subdirectory with scan data
+  (research.md Decision 5a) — feeding
+  `domain/count-and-size/derive-directory-view.ts`.
+- The worker singleton's startup routine: `findAllPendingPaths` + `markStopped`
+  (FR-019).
 
 ## Implementation
 
@@ -84,10 +81,10 @@ interface ScanRepositoryPort {
 
 ## Rules a consumer can rely on
 
-- All methods are synchronous (matches `better-sqlite3`'s synchronous API) —
-  use cases that call them remain `async` overall only because of the
+- All methods are synchronous (matches `better-sqlite3`'s synchronous API) — use
+  cases that call them remain `async` overall only because of the
   `FileSystemPort` calls interleaved with them.
 - `getSubtree(path)` always includes `path`'s own row first (if it exists) —
   callers don't need to special-case "self vs. descendants".
-- `upsertPending` fully replaces any prior row for that path — no field from
-  a previous scan leaks into the new one (FR-021).
+- `upsertPending` fully replaces any prior row for that path — no field from a
+  previous scan leaks into the new one (FR-021).
