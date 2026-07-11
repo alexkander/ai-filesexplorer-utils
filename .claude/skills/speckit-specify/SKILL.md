@@ -141,7 +141,7 @@ Given that feature description, do this:
     7. Identify Key Entities (if data involved)
     8. Return: SUCCESS (spec ready for planning)
 
-6. Write the specification to SPEC_FILE using the template structure, replacing placeholders with concrete details derived from the feature description (arguments) while preserving section order and headings.
+6. Write the specification to SPEC_FILE using the template structure, replacing placeholders with concrete details derived from the feature description (arguments) while preserving section order and headings. The entire spec, including the `**Input**: User description: "..."` line, MUST be written in English: if the feature description (arguments) was not given in English, translate it to English before inserting it there — never paste the original non-English text into `spec.md`. This applies regardless of the language used to converse with the assistant while running this command.
 
 7. **Specification Quality Validation**: After writing the initial spec, validate it against quality criteria:
 
