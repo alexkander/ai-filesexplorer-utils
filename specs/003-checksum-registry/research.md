@@ -51,10 +51,11 @@ engine instance for **both** the left and right root paths, always with
 regardless of the incremental/full choice the user made (see Decision 11 for
 why: unlike Count and Size, this feature cannot skip re-listing a subdirectory
 just because it succeeded before, since doing so would prevent ever detecting a
-later file change). Enqueuing both roots on this one engine instance still
-satisfies FR-010 ("only one active comparison scan within this tool") with no
-new coordination code; the two subtrees interleave arbitrarily on the same
-stack, which is fine because Pass 1 does no cross-side comparison. When
+later file change). Enqueuing both roots of the **same** comparison on this one
+engine instance needs no extra coordination — the two subtrees interleave
+arbitrarily on the same stack, which is fine because Pass 1 does no cross-side
+comparison. (This alone does **not** fully satisfy FR-010 across **different**
+"Compare" requests — see Decision 12 for the piece that does.) When
 `leftPath === rightPath` (comparing a directory against itself, spec Edge
 Cases), the same path is enqueued twice in the same run;
 `upsertPendingDirectory`/`upsertFileFacts` are ordinary SQL upserts keyed by
@@ -140,6 +141,21 @@ already-listed data at each level before it can proceed bottom-up; forcing it
 into the top-down shape would need a directory to be "revisited" after all its
 children finish, which the existing engine has no mechanism for — see Decision
 5).
+
+**Addendum — per-file progress (added post-implementation)**: `compareSubtree`'s
+`onProgress` callback was originally called only once per directory pair (at the
+top of each recursive call). Found insufficient during manual verification: a
+single large file with no cheap way to prove a difference (same size, same
+partial hash) can take many seconds to fully hash, during which the UI had no
+way to distinguish "actively reading this exact file" from "queued, will get to
+it soon" for every other unresolved sibling in the same directory.
+`compareFilePair` now also calls `onProgress` with the specific file pair's
+paths, but only once the cascade actually needs to read content
+(`need_partial`/`need_full`) — never for a pair that resolves via size alone,
+keeping SC-004's "never touch a file that doesn't need reading" guarantee
+intact. `get-comparison-view.ts` uses this for an exact-path match on file
+entries (not a subtree-containment check like it uses for directories), so only
+the one file genuinely being hashed shows `scanning`.
 
 ## Decision 4: `ChecksumPort` — streamed SHA-256, one algorithm for both stages
 
@@ -238,6 +254,16 @@ structural/checksum facts are persisted, keyed by path alone. The
 currently-selected left/right pair is pure client-side state
 (`panes-storage.ts`), never sent to a "start a named comparison" endpoint that
 would need a durable identity.
+
+**Revision (found during manual verification)**: which entries exist to _pair_
+(FR-006) is **not** taken from the repository as originally stated above — a
+pair that has never been Compared yet has zero repository rows for either side,
+which made `/status` return an empty entry list instead of every live entry
+shown as `not_compared` (violating FR-007's "before any Compare has ever run"
+requirement). Pairing is instead read from a live `FileSystemPort.listChildren`
+call on each side; the repository is still consulted exactly as described above,
+but only per already-paired entry, for whatever checksum/outcome data happens to
+exist. See `data-model.md`'s "Pairing source" note.
 
 **Rationale**: Directly implements the spec's Assumption that "Comparison Pair"
 is ephemeral, and reuses an already-proven pattern (Count and Size Decision 1)
@@ -338,3 +364,65 @@ correctness bug, not merely a style choice). Making Pass 1 itself decide what's
 the validity check Pass 2 already needs to do bottom-up for its own cascade;
 simpler to let Pass 2 read Pass 1's always-fresh facts directly than to invent a
 separate change-notification channel between the two passes).
+
+## Decision 12: `ComparisonQueue` serializes whole "Compare" pipelines across different requests
+
+**Decision (added post-implementation)**: Decision 2's claim that sharing
+`ScanEngine` satisfies FR-010 "with no new coordination code" only covers one
+comparison's own two roots interleaving on the same stack — it says nothing
+about **two different** `POST /compare` requests (different pairs) arriving
+close together. A new class, `ComparisonQueue`
+(`application/directory-comparison/start-comparison.ts`, instantiated as a
+singleton in `infrastructure/directory-comparison/comparison-queue.ts`), owns a
+simple FIFO queue of `{ leftPath, rightPath, mode }` requests and runs them one
+at a time: enqueue both roots on `structuralScanWorker`, poll
+`comparisonRepositoryAdapter.getSubtree()` until neither root has a `'pending'`
+node left (Pass 1 settled), then `await comparisonPassWorker.run(...)` (Pass 2)
+before starting the next queued request. This is the actual mechanism that
+satisfies FR-010 ("only one active comparison scan... requests enqueued, not run
+concurrently or discarded") for the cross-request case; `comparisonPassWorker`
+itself (Decision 5) intentionally has no queue of its own — it only supports one
+`run()` at a time by contract, relying entirely on `ComparisonQueue` never
+calling it again before the previous call resolves.
+
+**Rationale**: FR-010 is explicit that a second `POST /compare` while one is
+active "MUST be enqueued, not run concurrently or discarded" — this has to hold
+regardless of whether the two requests share any path. Without
+`ComparisonQueue`, two different pairs' Pass 1 roots would correctly interleave
+on the shared engine (harmless), but their Pass 2 runs (`comparisonPassWorker`,
+a single mutable-state singleton) would race and corrupt each other's
+`activePair`/ `activePath`/cancellation-key bookkeeping.
+
+**Alternatives considered**: Giving `comparisonPassWorker` its own internal
+queue instead (rejected — `ComparisonQueue` already needs to sequence the
+Pass-1-settle wait before Pass 2 can even start, so a second, separate queue one
+layer down would be redundant bookkeeping for the same "one full pipeline at a
+time" invariant).
+
+## Decision 13: Extending the shared `FileSystemPort` for this feature's needs
+
+**Decision (added post-implementation)**: Two additive changes were made to
+`application/scanning/filesystem-port.ts` (shared with Count and Size, spec 002)
+to support this feature:
+
+- `RawEntry` gained an optional `modificationTime?: string` field (ISO 8601,
+  files only), populated by `infrastructure/scanning/filesystem-adapter.ts` from
+  `fs.Stats.mtime`. Needed because `FileChecksumEntry.modificationTime`
+  (Decision 11's incremental-validity check) has no other source — Count and
+  Size never needed a file's mtime, only its size.
+- `ListChildrenOutcome`'s failure `reason` was split from a single
+  `'unreadable'` value into `'not_found' | 'unreadable'`, so `GET /list` can
+  return the `404`/`403` split its contract already specified. Count and Size's
+  own `GET /list` route ignores the distinction and keeps returning a single
+  `404` for either reason, so this is non-breaking for it.
+
+**Rationale**: Both fields are optional/additive — no existing caller
+(`application/count-and-size/*`) reads either new field, so Count and Size's
+behavior is unchanged. Mirrors Decision 6's precedent of extending/relocating
+shared `scanning` infrastructure rather than forking a second near-duplicate
+implementation.
+
+**Alternatives considered**: A second, feature-owned `FileSystemPort`
+implementation with the extra fields (rejected — duplicates ~20 lines of
+`fs.readdir`/`stat` logic for two small additive fields, the exact Constitution
+Principle I violation Decision 6 already rejected once).

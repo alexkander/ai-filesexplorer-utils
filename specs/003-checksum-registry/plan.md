@@ -140,8 +140,10 @@ application/
 │   ├── list-directory.ts              # Use case: paginated listing for one pane (no comparison data)
 │   ├── get-comparison-view.ts         # Use case: EntryComparisonResult list for (leftPath, rightPath) — read-only,
 │   │                                   # reflects whatever Pass 1/2 have persisted so far (live during Scanning)
-│   ├── start-comparison.ts            # Use case: Pass 1 (enqueue both roots on the shared ScanEngine),
-│   │                                   # then chains into Pass 2 once Pass 1 settles; mode: 'incremental' | 'full'
+│   ├── start-comparison.ts            # Use case + ComparisonQueue class (research.md Decision 12): Pass 1
+│   │                                   # (enqueue both roots on the shared ScanEngine), then chains into Pass 2
+│   │                                   # once Pass 1 settles; mode: 'incremental' | 'full'. The queue itself
+│   │                                   # serializes different "Compare" requests (FR-010) — see Decision 12.
 │   ├── stop-comparison.ts             # Use case: stop whichever pass is active
 │   ├── list-entries.ts                # Pass 1's per-node step: traverseDirectory (shared) + persist direct
 │   │                                   # files' size/mtime + subdirectory rows — no hashing (research.md Decision 3)
@@ -158,6 +160,9 @@ infrastructure/
 │   │                                   # feature's adapters and list-entries.ts as its per-node step
 │   ├── comparison-pass-worker.ts      # Singleton: lightweight bottom-up worker for Pass 2 (own cancelable
 │   │                                   # single-active-run loop, chained after Pass 1 by start-comparison.ts)
+│   ├── comparison-queue.ts            # Singleton: instantiates ComparisonQueue (research.md Decision 12) —
+│   │                                   # serializes whole Pass1+Pass2 pipelines across different "Compare"
+│   │                                   # requests (FR-010), not just one pair's own two roots
 │   ├── panes-storage.ts               # localStorage read/write for left/right paths + Move sync setting
 │   └── ui/
 │       ├── directory-comparison-explorer.tsx # Owns leftPath/rightPath/moveSync client state; wires the two panes

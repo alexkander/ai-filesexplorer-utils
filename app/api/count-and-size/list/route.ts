@@ -4,7 +4,7 @@ import {
   type SortBy,
   type SortDir,
 } from '@/application/count-and-size/list-directory';
-import { filesystemAdapter } from '@/infrastructure/count-and-size/filesystem-adapter';
+import { filesystemAdapter } from '@/infrastructure/scanning/filesystem-adapter';
 import { scanRepositoryAdapter } from '@/infrastructure/count-and-size/scan-repository-adapter';
 
 const DEFAULT_LIMIT = 200;

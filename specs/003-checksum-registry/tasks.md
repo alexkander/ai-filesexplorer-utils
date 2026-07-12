@@ -30,12 +30,12 @@ independent implementation and testing of each story.
 before any new code depends on it (research.md Decision 6). No new runtime
 dependency is needed for this feature.
 
-- [ ] T001 [P] Move `infrastructure/count-and-size/filesystem-adapter.ts` to
+- [x] T001 [P] Move `infrastructure/count-and-size/filesystem-adapter.ts` to
       `infrastructure/scanning/filesystem-adapter.ts` (no content changes — it
       was already generic `fs.readdir`/`stat` logic with zero count/size
       awareness). Update `infrastructure/count-and-size/scan-worker.ts`'s import
       accordingly (research.md Decision 6).
-- [ ] T002 Create the `domain/directory-comparison/`,
+- [x] T002 Create the `domain/directory-comparison/`,
       `application/directory-comparison/`,
       `infrastructure/directory-comparison/`, and
       `infrastructure/directory-comparison/ui/` directory scaffolding, per
@@ -55,7 +55,7 @@ browsing/navigation with no comparison data; see each story's own tasks below.)
 
 **⚠️ CRITICAL**: No user story work can begin until this phase is complete.
 
-- [ ] T003 [P] Update `domain/navigation/menu-entry.ts`: append
+- [x] T003 [P] Update `domain/navigation/menu-entry.ts`: append
       `{ key: 'directory-comparison', label: 'Compare Directories', route: '/directory-comparison' }`
       to `menuEntries`.
 
@@ -76,30 +76,30 @@ affects the other. Clicking a file does nothing.
 
 ### Implementation for User Story 1
 
-- [ ] T004 [US1] Create `application/directory-comparison/list-directory.ts`: a
+- [x] T004 [US1] Create `application/directory-comparison/list-directory.ts`: a
       use case taking `(path, offset, limit, FileSystemPort)` that lists
       `path`'s direct children via the shared `FileSystemPort.listChildren` and
       returns a page of entries plus `hasMore` — no comparison data (spec
       FR-001, FR-001a; contracts/directory-comparison-api-contract.md
       `GET /list`). (Depends on T001.)
-- [ ] T005 [P] [US1] Create `app/api/directory-comparison/list/route.ts`: `GET`
+- [x] T005 [P] [US1] Create `app/api/directory-comparison/list/route.ts`: `GET`
       Route Handler parsing `path`/`offset`/`limit` query params, wiring the
       relocated `filesystemAdapter`, calling `list-directory.ts`, returning
       `404`/`403` per contracts/directory-comparison-api-contract.md. (Depends
       on T004.)
-- [ ] T006 [P] [US1] Create
+- [x] T006 [P] [US1] Create
       `infrastructure/directory-comparison/panes-storage.ts`:
       `loadPanes()`/`savePanes({ leftPath, rightPath })` over a `localStorage`
       key, defaulting both paths to `/` (research.md Decision 9; `moveSync`
       field added in User Story 2). (Depends on T002.)
-- [ ] T007 [US1] Create
+- [x] T007 [US1] Create
       `infrastructure/directory-comparison/ui/comparison-pane.tsx`
       (`'use client'`): fetches `GET /api/directory-comparison/list` for its own
       `path`, renders directory entries as clickable (calling an
       `onNavigate(path)` prop) and file entries as inert, loads more entries as
       the user scrolls (spec FR-001, FR-001a). No comparison-status rendering
       yet (added in User Story 3). (Depends on T005.)
-- [ ] T008 [US1] Create
+- [x] T008 [US1] Create
       `infrastructure/directory-comparison/ui/directory-comparison-explorer.tsx`
       (`'use client'`): owns `leftPath`/`rightPath` client state, hydrated from
       `panes-storage.ts` post-mount (starts at `/` for SSR, same
@@ -107,7 +107,7 @@ affects the other. Clicking a file does nothing.
       `count-and-size-explorer.tsx`), persisted on every change; renders two
       `<ComparisonPane>` side by side, each with its own Up button (disabled at
       `/`) (spec FR-001). (Depends on T006, T007.)
-- [ ] T009 [US1] Create `app/directory-comparison/page.tsx`: fixed route, thin,
+- [x] T009 [US1] Create `app/directory-comparison/page.tsx`: fixed route, thin,
       renders `<DirectoryComparisonExplorer>`. (Depends on T003, T008.)
 
 **Checkpoint**: User Story 1 is fully functional and independently testable —
@@ -127,16 +127,16 @@ on.
 
 ### Implementation for User Story 2
 
-- [ ] T010 [US2] Update `infrastructure/directory-comparison/panes-storage.ts`:
+- [x] T010 [US2] Update `infrastructure/directory-comparison/panes-storage.ts`:
       add a `moveSync: boolean` field (default `false`) to the persisted shape,
       loaded/saved alongside the two paths (spec FR-002). (Depends on T006.)
-- [ ] T011 [US2] Update
+- [x] T011 [US2] Update
       `infrastructure/directory-comparison/ui/comparison-pane.tsx`: when
       `GET /list` returns `404` for the current `path` (only reachable via a
       synced navigation attempt, since this tool never lets a pane navigate
       anywhere but a real listed entry on its own), render a clear "not found"
       state instead of a blank/broken listing (spec FR-002a). (Depends on T007.)
-- [ ] T012 [US2] Update
+- [x] T012 [US2] Update
       `infrastructure/directory-comparison/ui/directory-comparison-explorer.tsx`:
       add the Move sync toggle (persisted via T010); when on, wrap each pane's
       `onNavigate` so entering a subdirectory or going up on one side also
@@ -166,30 +166,30 @@ Compare. The differing file ends up `Differs`, the lone file
 
 ### Domain (pure — no I/O)
 
-- [ ] T013 [P] [US3] Create
+- [x] T013 [P] [US3] Create
       `domain/directory-comparison/directory-comparison-node.ts`:
       `DirectoryComparisonNode` extending
       `domain/scanning/scan-node-status.ts`'s `ScanNodeStatus`, plus a
       `directoryChecksum: string | null` field (data-model.md
       `DirectoryComparisonNode`). (Depends on T002.)
-- [ ] T014 [P] [US3] Create
+- [x] T014 [P] [US3] Create
       `domain/directory-comparison/file-checksum-entry.ts`: the
       `FileChecksumEntry` type (data-model.md `FileChecksumEntry`). (Depends on
       T002.)
-- [ ] T015 [P] [US3] Create `domain/directory-comparison/checksum-cascade.ts`: a
+- [x] T015 [P] [US3] Create `domain/directory-comparison/checksum-cascade.ts`: a
       pure function, given a left/right file pair's known
       `size`/`partialChecksum`/`fullChecksum` values (each possibly not yet
       computed), returning either the next cascade stage still needed or a final
       `matching`/`differs` verdict (research.md Decision 3's cascade: size →
       partial hash → full hash, short-circuiting on the first mismatch).
       (Depends on T002.)
-- [ ] T016 [US3] Create
+- [x] T016 [US3] Create
       `domain/directory-comparison/entry-comparison-result.ts`: the
       `EntryComparisonResult` type (the 6 FR-007 statuses) and a pure
       pairing-by-name function over two sides' direct entries (spec FR-006,
       FR-007; data-model.md `EntryComparisonResult`). (Depends on T013, T014,
       T015.)
-- [ ] T017 [US3] Create
+- [x] T017 [US3] Create
       `domain/directory-comparison/derive-directory-checksum.ts`: a pure
       Merkle-style compose function — given a sorted-by-name list of
       `{ name, type, checksum }` for a directory's direct entries, returns the
@@ -198,49 +198,59 @@ Compare. The differing file ends up `Differs`, the lone file
 
 ### Application ports
 
-- [ ] T018 [P] [US3] Create `application/directory-comparison/checksum-port.ts`:
+- [x] T018 [P] [US3] Create `application/directory-comparison/checksum-port.ts`:
       the `ChecksumPort` interface (contracts/checksum-port-contract.md).
       (Depends on T002.)
-- [ ] T019 [US3] Create
+- [x] T019 [US3] Create
       `application/directory-comparison/comparison-repository-port.ts`: the
       `ComparisonRepositoryPort` interface, including
       `recordContentReadFailure(path)` — a Pass-2-only method that sets
       `hasUnreadableEntries` without touching `ownOutcome`, which stays
       Pass-1-owned (contracts/comparison-repository-port-contract.md; found
-      missing during `/speckit-analyze` review). (Depends on T013, T014.)
+      missing during `/speckit-analyze` review) — plus `deleteFile(path)` and
+      `deleteDirectorySubtree(path)`, Pass-1-only methods for pruning a
+      previously-listed child that no longer exists (or changed kind), found
+      missing during manual verification: a deleted file's stale row otherwise
+      lingers forever and Pass 2 keeps pairing against it. (Depends on T013,
+      T014.)
 
 ### Infrastructure adapters
 
-- [ ] T020 [P] [US3] Create
+- [x] T020 [P] [US3] Create
       `infrastructure/directory-comparison/checksum-adapter.ts` implementing
       `ChecksumPort`: `fs.createReadStream` piped through
       `crypto.createHash('sha256')`; `computePartialChecksum` destroys the
       stream after 64 KiB (research.md Decision 4). (Depends on T018.)
-- [ ] T021 [P] [US3] Create
+- [x] T021 [P] [US3] Create
       `infrastructure/directory-comparison/sqlite-client.ts`: creates `data/` if
       missing, opens `data/directory-comparison.sqlite` (env override
       `DIRECTORY_COMPARISON_DB_PATH`) via `better-sqlite3`, and runs
       `CREATE TABLE IF NOT EXISTS` migrations for `directory_comparison_nodes`
       and `file_checksums` matching data-model.md (research.md Decision 1).
       (Depends on T002.)
-- [ ] T022 [US3] Create
+- [x] T022 [US3] Create
       `infrastructure/directory-comparison/comparison-repository-adapter.ts`
       implementing `ComparisonRepositoryPort` via `better-sqlite3`. (Depends on
       T019, T021.)
 
 ### Pass 1 — structural listing
 
-- [ ] T023 [US3] Create `application/directory-comparison/list-entries.ts`: Pass
+- [x] T023 [US3] Create `application/directory-comparison/list-entries.ts`: Pass
       1's per-node step — calls the shared `traverseDirectory`, then
       `upsertFileFacts` for each direct file (size/mtime only, no hashing),
       `upsertPendingDirectory` for each subdirectory, and
       `recordDirectoryOwnResult` for this directory (research.md Decision 2).
-      Always relists unconditionally — this step does not consult or apply any
-      `doneSet`-style skip; the incremental/full distinction is entirely Pass
-      2's concern (research.md Decision 11, revised after `/speckit-analyze`
-      found the original doneSet-reuse plan would have prevented ever detecting
-      a changed file). (Depends on T001, T022.)
-- [ ] T024 [US3] Create
+      Also compares the fresh listing against `getDirectChildren`'s
+      previously-known children and calls `deleteFile`/`deleteDirectorySubtree`
+      for any that vanished or changed kind (found missing during manual
+      verification — otherwise a deleted/renamed entry's stale row lingers and
+      Pass 2 keeps pairing against it). Always relists unconditionally — this
+      step does not consult or apply any `doneSet`-style skip; the
+      incremental/full distinction is entirely Pass 2's concern (research.md
+      Decision 11, revised after `/speckit-analyze` found the original
+      doneSet-reuse plan would have prevented ever detecting a changed file).
+      (Depends on T001, T022.)
+- [x] T024 [US3] Create
       `infrastructure/directory-comparison/structural-scan-worker.ts`: a
       singleton instantiating the shared
       `infrastructure/scanning/scan-engine.ts`'s `ScanEngine` with
@@ -252,7 +262,7 @@ Compare. The differing file ends up `Differs`, the lone file
 
 ### Pass 2 — bottom-up cascading comparison
 
-- [ ] T025 [US3] Create `application/directory-comparison/compare-subtree.ts`:
+- [x] T025 [US3] Create `application/directory-comparison/compare-subtree.ts`:
       Pass 2 — walks the two already-listed subtrees bottom-up
       (depth-descending, using the same depth-sorting technique as
       `deriveDoneSet`, but its own logic — this is not a call into
@@ -272,7 +282,7 @@ Compare. The differing file ends up `Differs`, the lone file
       throws for a file, and propagates the resulting Error status to ancestors
       (spec FR-011, FR-011a). (Depends on T015, T016, T017, T018, T019, T020,
       T022.)
-- [ ] T026 [US3] Create
+- [x] T026 [US3] Create
       `infrastructure/directory-comparison/comparison-pass-worker.ts`: a
       lightweight singleton running `compare-subtree.ts` over a given
       `{ leftRoot, rightRoot, mode: 'incremental' | 'full' }` — this is where
@@ -283,39 +293,49 @@ Compare. The differing file ends up `Differs`, the lone file
 
 ### Orchestration and read-side
 
-- [ ] T027 [US3] Create `application/directory-comparison/start-comparison.ts`:
-      enqueues both roots on `structural-scan-worker.ts` (Pass 1 — always
-      relists unconditionally, no `mode` of its own; research.md Decision 11),
-      then starts `comparison-pass-worker.ts` (Pass 2) with the user's
+- [x] T027 [US3] Create `application/directory-comparison/start-comparison.ts`:
+      a `ComparisonQueue` class (research.md Decision 12) that serializes whole
+      Pass1+Pass2 pipelines across _different_ "Compare" requests (spec FR-010 —
+      reusing the shared `ScanEngine`, per Decision 2, only handles one
+      comparison's own two roots interleaving, not two different pairs), plus
+      the `startComparison` use case: enqueues both roots on
+      `structural-scan-worker.ts` (Pass 1 — always relists unconditionally, no
+      `mode` of its own; research.md Decision 11), then starts
+      `comparison-pass-worker.ts` (Pass 2) with the user's
       `mode: 'incremental' | 'full'` once Pass 1 settles for both roots (spec
       FR-006, FR-008). `mode: 'full'` (the "Force full re-compare" action, spec
       FR-009) always covers both sides together and clears cached checksums
       before Pass 2 runs. (Depends on T024, T026.)
-- [ ] T028 [US3] Create `application/directory-comparison/stop-comparison.ts`:
+- [x] T028 [US3] Create `application/directory-comparison/stop-comparison.ts`:
       cancels whichever pass (structural or comparison) is currently active for
       a given pair's roots (spec FR-013). (Depends on T024, T026.)
-- [ ] T029 [US3] Create
+- [x] T029 [US3] Create
       `application/directory-comparison/get-comparison-view.ts`: read-only use
-      case returning `EntryComparisonResult[]` for `(leftPath,     rightPath)`'s
-      direct entries, derived fresh from whatever
-      `directory_comparison_nodes`/`file_checksums` rows currently exist —
-      reflects live progress while a pass is active (spec FR-007; data-model.md
-      `EntryComparisonResult`; research.md Decision 7). (Depends on T016, T022.)
+      case returning `EntryComparisonResult[]` for `(leftPath, rightPath)`'s
+      direct entries. Pairing (FR-006) is read from a live `FileSystemPort`
+      listing on each side, not from the repository — a pair with zero
+      repository rows (never Compared yet) must still show every live entry as
+      `not_compared`, not an empty list (research.md Decision 7's revision). The
+      repository (`directory_comparison_nodes`/`file_checksums`) is then
+      consulted per already-paired entry for whatever checksum/outcome data
+      exists, reflecting live progress while a pass is active (spec FR-007;
+      data-model.md `EntryComparisonResult`). (Depends on T016, T022; also
+      depends on T001's `FileSystemPort`/`filesystemAdapter`.)
 
 ### API routes
 
-- [ ] T030 [P] [US3] Create `app/api/directory-comparison/status/route.ts`:
+- [x] T030 [P] [US3] Create `app/api/directory-comparison/status/route.ts`:
       `GET` Route Handler parsing `left`/`right` query params, wiring
       `comparison-repository-adapter.ts`, calling `get-comparison-view.ts`,
       including which pass (if any) is currently active
       (contracts/directory-comparison-api-contract.md `GET /status`). (Depends
       on T024, T026, T029.)
-- [ ] T031 [P] [US3] Create `app/api/directory-comparison/compare/route.ts`:
+- [x] T031 [P] [US3] Create `app/api/directory-comparison/compare/route.ts`:
       `POST` Route Handler reading `{ leftPath, rightPath, mode? }`, calling
       `start-comparison.ts`, returning `202 { accepted: true }` immediately
       (contracts/directory-comparison-api-contract.md `POST /compare`). (Depends
       on T027.)
-- [ ] T032 [P] [US3] Create `app/api/directory-comparison/stop/route.ts`: `POST`
+- [x] T032 [P] [US3] Create `app/api/directory-comparison/stop/route.ts`: `POST`
       Route Handler reading `{ leftPath, rightPath }`, calling
       `stop-comparison.ts`, returning `{ stopped: boolean }`
       (contracts/directory-comparison-api-contract.md `POST /stop`). (Depends on
@@ -323,23 +343,23 @@ Compare. The differing file ends up `Differs`, the lone file
 
 ### UI
 
-- [ ] T033 [P] [US3] Create
+- [x] T033 [P] [US3] Create
       `infrastructure/directory-comparison/ui/comparison-status-colors.ts`: a
       `Record<EntryComparisonResult['status'], string>` color map for the 6
       statuses (spec FR-007), same pattern as Count and Size's
       `STATUS_DOT_COLORS`.
-- [ ] T034 [US3] Update
+- [x] T034 [US3] Update
       `infrastructure/directory-comparison/ui/comparison-pane.tsx`: poll
       `GET /api/directory-comparison/status` for the current pair while either
       side is mid-pass, render each entry's status dot via
       `comparison-status-colors.ts`, with the state name available on hover
       (spec FR-007). (Depends on T007, T030, T033.)
-- [ ] T035 [US3] Create
+- [x] T035 [US3] Create
       `infrastructure/directory-comparison/ui/comparison-status-panel.tsx`
       (`'use client'`): "Compare", "Force full re-compare", and "Stop" buttons
       (mirrors Count and Size's `scan-status-panel.tsx` layout) plus overall
       pass state text (spec FR-003, FR-009, FR-013). (Depends on T031, T032.)
-- [ ] T036 [US3] Update
+- [x] T036 [US3] Update
       `infrastructure/directory-comparison/ui/directory-comparison-explorer.tsx`:
       render `<ComparisonStatusPanel>` wired to the current `leftPath`/
       `rightPath`, refreshing both panes' polling on Compare/Stop (spec Story
@@ -355,9 +375,9 @@ incremental vs. force-full and Stop all work (quickstart.md steps 6–16).
 
 **Purpose**: Repo-wide conventions and final validation.
 
-- [ ] T037 [P] Run `pnpm lint:fix` and `pnpm format` across all new/changed
+- [x] T037 [P] Run `pnpm lint:fix` and `pnpm format` across all new/changed
       files (repo's Husky/lint-staged conventions).
-- [ ] T038 Run the full `quickstart.md` validation: local `pnpm dev`, Docker dev
+- [x] T038 Run the full `quickstart.md` validation: local `pnpm dev`, Docker dev
       (`./scripts/dev.sh`), and Docker prod (`./scripts/prod.sh`) — including
       the cascade-avoids-unnecessary-reads check (step 8) and the
       unreadable-entry-propagates-Error check (step 9), both specific to this

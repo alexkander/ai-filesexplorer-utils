@@ -37,6 +37,7 @@ overall pass progress — used for the initial view and for polling while
 ```json
 {
   "passActive": "structural",
+  "activePath": { "pass": "structural", "path": "/a/photos/2019" },
   "entries": [
     { "name": "photos", "kind": "directory", "status": "scanning" },
     { "name": "notes.txt", "kind": "file", "status": "matching" },
@@ -54,6 +55,19 @@ have settled for this pair, or before "Compare" was ever pressed). Each entry's
 (`data-model.md` `EntryComparisonResult`). Before "Compare" has ever been
 pressed for this pair, every entry shows `"not_compared"` and `passActive` is
 `null`.
+
+`activePath` (added post-implementation, found necessary during manual
+verification — there was no way to see progress deep inside a subtree without
+navigating there) is
+`{ pass: "structural"; path: string } | { pass: "comparison"; left: string; right: string } | null`
+— the literal path(s) either background worker is processing **right now**,
+system-wide (not scoped to `left`/`right` — only one comparison runs at a time
+in this tool, FR-010). `null` exactly when both workers are idle. Unlike
+`passActive`, this is populated even when the active work isn't inside the
+currently-viewed pair, so the UI can show real progress regardless of
+navigation. For `pass: "comparison"`, `left`/`right` point at whatever the most
+specific active unit is — a directory pair, or (research.md Decision 3's
+addendum) an exact file pair once that file's content is actually being read.
 
 ## `POST /api/directory-comparison/compare`
 
