@@ -42,12 +42,18 @@ nothing duplicated between them:
 - `dev` stage: `node:22-bookworm-slim`, installs deps with pnpm, runs
   `pnpm run dev`. Used by `docker-compose.yml` (`network_mode: host`, source
   mounted as a volume for hot-reload, `node_modules`/`.next` as anonymous
-  volumes). `.devcontainer/devcontainer.json` points at this same
-  `docker-compose.yml`, so the VS Code Dev Container and plain `docker compose`
-  workflows share one image/config.
+  volumes).
 - `runner` stage: `node:22-alpine`, copies only the Next.js `standalone` output
   — no pnpm, no source. Used by `docker-compose.prod.yml` (port `3000:3000`
   published, no bind mounts).
+
+`.devcontainer/devcontainer.json` (VS Code Dev Containers) does **not** use the
+`Dockerfile` or Compose at all: it builds from the plain `node:22-bookworm-slim`
+image directly and runs `corepack enable && pnpm install --frozen-lockfile` via
+`postCreateCommand`. `node_modules`/`.next` live in named volumes
+(`ai-filesexplorer-utils-node_modules`, `ai-filesexplorer-utils-next`). The dev
+server is not started automatically — run `pnpm dev` in the container's
+terminal.
 
 Wrapper scripts (`scripts/dev.sh`, `scripts/dev-down.sh`, `scripts/prod.sh`,
 `scripts/prod-down.sh`) just call
