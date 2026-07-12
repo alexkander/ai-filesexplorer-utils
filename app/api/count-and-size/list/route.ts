@@ -8,7 +8,14 @@ import { filesystemAdapter } from '@/infrastructure/count-and-size/filesystem-ad
 import { scanRepositoryAdapter } from '@/infrastructure/count-and-size/scan-repository-adapter';
 
 const DEFAULT_LIMIT = 200;
-const SORT_BY_VALUES: SortBy[] = ['name', 'type', 'size', 'status', 'date'];
+const SORT_BY_VALUES: SortBy[] = [
+  'name',
+  'type',
+  'size',
+  'count',
+  'status',
+  'date',
+];
 
 export async function GET(request: NextRequest) {
   const path = request.nextUrl.searchParams.get('path');

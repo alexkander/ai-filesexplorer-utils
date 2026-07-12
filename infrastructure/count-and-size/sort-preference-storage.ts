@@ -4,7 +4,14 @@ import type {
 } from '@/application/count-and-size/list-directory';
 
 const STORAGE_KEY = 'count-and-size:sort-preference';
-const VALID_SORT_BY: SortBy[] = ['name', 'type', 'size', 'status', 'date'];
+const VALID_SORT_BY: SortBy[] = [
+  'name',
+  'type',
+  'size',
+  'count',
+  'status',
+  'date',
+];
 
 export interface SortPreference {
   sortBy: SortBy;

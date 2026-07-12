@@ -7,7 +7,7 @@ import {
   type DirectoryState,
 } from '@/domain/count-and-size/derive-directory-view';
 
-export type SortBy = 'name' | 'type' | 'size' | 'status' | 'date';
+export type SortBy = 'name' | 'type' | 'size' | 'count' | 'status' | 'date';
 export type SortDir = 'asc' | 'desc';
 
 export interface ListedEntry {
@@ -65,8 +65,9 @@ function getView(
  *
  * Sorting happens on the full listing before pagination — a page-only sort
  * would be meaningless (the same entry could land on different pages
- * depending on the requested offset). Sorting by `size`/`status`/`date`
- * therefore needs every directory entry's DirectoryView computed up front
+ * depending on the requested offset). Sorting by `size`/`count`/`status`/
+ * `date` therefore needs every directory entry's DirectoryView computed up
+ * front
  * (one recursive query each), not just the returned page's; `name`/`type`
  * need no scan data at all.
  */
@@ -84,7 +85,10 @@ export async function listDirectory(
 
   const viewCache = new Map<string, DirectoryView>();
   const needsScanDataForSort =
-    sortBy === 'size' || sortBy === 'status' || sortBy === 'date';
+    sortBy === 'size' ||
+    sortBy === 'count' ||
+    sortBy === 'status' ||
+    sortBy === 'date';
   if (needsScanDataForSort) {
     for (const entry of outcome.result.entries) {
       getView(entry, scanRepository, viewCache);
@@ -99,6 +103,10 @@ export async function listDirectory(
         return entry.kind === 'file'
           ? entry.size
           : (viewCache.get(entry.path)?.aggregatedSize ?? 0);
+      case 'count':
+        return entry.kind === 'file'
+          ? 1
+          : (viewCache.get(entry.path)?.aggregatedCount ?? 0);
       case 'status':
         return entry.kind === 'directory'
           ? STATE_ORDER[viewCache.get(entry.path)?.state ?? 'not_scanned']

@@ -33,6 +33,7 @@ const SORT_OPTIONS: { value: SortBy; label: string }[] = [
   { value: 'name', label: 'Name' },
   { value: 'type', label: 'Type' },
   { value: 'size', label: 'Size' },
+  { value: 'count', label: 'Files' },
   { value: 'status', label: 'Status' },
   { value: 'date', label: 'Scanned' },
 ];
