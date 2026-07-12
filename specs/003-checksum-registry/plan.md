@@ -116,7 +116,8 @@ specs/003-checksum-registry/
 │   ├── checksum-port-contract.md
 │   ├── comparison-repository-port-contract.md
 │   ├── directory-comparison-api-contract.md
-│   └── copy-port-contract.md          # Added post-implementation (research.md Decision 14)
+│   ├── copy-port-contract.md          # Added post-implementation (research.md Decision 14)
+│   └── size-info-port-contract.md     # Added post-implementation (research.md Decision 17)
 └── tasks.md             # Phase 2 output (/speckit-tasks command - NOT created by /speckit-plan)
 ```
 
@@ -138,7 +139,9 @@ application/
 ├── directory-comparison/
 │   ├── checksum-port.ts               # ChecksumPort interface (partial/full content hashing)
 │   ├── comparison-repository-port.ts  # ComparisonRepositoryPort interface
-│   ├── list-directory.ts              # Use case: paginated listing for one pane (no comparison data)
+│   ├── list-directory.ts              # Use case: paginated listing for one pane (no comparison data),
+│   │                                   # optionally overlaying Count and Size's own read-only size/count (Decision 17)
+│   ├── size-info-port.ts              # SizeInfoPort interface (research.md Decision 17, spec FR-019)
 │   ├── get-comparison-view.ts         # Use case: EntryComparisonResult list for (leftPath, rightPath) — read-only,
 │   │                                   # reflects whatever Pass 1/2 have persisted so far (live during Scanning)
 │   ├── start-comparison.ts            # Use case + ComparisonQueue class (research.md Decision 12): Pass 1
@@ -168,9 +171,13 @@ infrastructure/
 │   │                                   # requests (FR-010), not just one pair's own two roots
 │   ├── panes-storage.ts               # localStorage read/write for left/right paths + Move sync setting
 │   ├── copy-adapter.ts                # Implements CopyPort via fs.promises.cp (recursive, never overwrites)
+│   ├── count-and-size-readonly-adapter.ts # Implements SizeInfoPort — a SECOND, readonly:true better-sqlite3
+│   │                                   # connection straight to Count and Size's own database (research.md Decision 17)
 │   └── ui/
 │       ├── directory-comparison-explorer.tsx # Owns leftPath/rightPath/moveSync client state; wires the two panes;
 │       │                               # owns the copy confirm/request/refresh-token flow (research.md Decision 14)
+│       ├── format-size.ts             # humanizeSize/exactBytesLabel — a local copy of Count and Size's own
+│       │                               # (same rationale as Decision 17: no cross-feature-slice imports)
 │       ├── comparison-pane.tsx        # One side's listing + pagination + onNavigate (mirrors directory-browser.tsx,
 │       │                               # shows EntryComparisonResult status dot instead of count/size, plus a Copy
 │       │                               # button for "Only on this side" entries)

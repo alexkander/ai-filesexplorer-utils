@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { listDirectory } from '@/application/directory-comparison/list-directory';
 import { filesystemAdapter } from '@/infrastructure/scanning/filesystem-adapter';
+import { countAndSizeReadonlyAdapter } from '@/infrastructure/directory-comparison/count-and-size-readonly-adapter';
 
 const DEFAULT_LIMIT = 200;
 
@@ -15,7 +16,13 @@ export async function GET(request: NextRequest) {
     request.nextUrl.searchParams.get('limit') ?? DEFAULT_LIMIT,
   );
 
-  const outcome = await listDirectory(path, offset, limit, filesystemAdapter);
+  const outcome = await listDirectory(
+    path,
+    offset,
+    limit,
+    filesystemAdapter,
+    countAndSizeReadonlyAdapter,
+  );
 
   if (!outcome.ok) {
     return outcome.reason === 'unreadable'

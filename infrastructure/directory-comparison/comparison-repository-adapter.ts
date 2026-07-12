@@ -14,6 +14,7 @@ interface DirRow {
   has_unreadable_entries: number;
   directory_checksum: string | null;
   own_finished_at: string | null;
+  resolved_by_pass2: number;
 }
 
 interface FileRow {
@@ -35,6 +36,7 @@ function toNode(row: DirRow): DirectoryComparisonNode {
     ownOutcome: row.own_outcome as DirectoryComparisonNode['ownOutcome'],
     hasUnreadableEntries: Boolean(row.has_unreadable_entries),
     directoryChecksum: row.directory_checksum,
+    resolvedByPass2: Boolean(row.resolved_by_pass2),
   };
 }
 
@@ -58,10 +60,14 @@ function subtreeLikePattern(path: string): string {
   return (escaped === '/' ? '' : escaped) + '/%';
 }
 
+// resolved_by_pass2 is deliberately NOT touched in the ON CONFLICT branch —
+// a fresh Pass 1 relisting must not erase Pass 2's last real conclusion for
+// an existing node (FR-016); it's only reset by clearChecksumsInSubtree
+// (mode: 'full') or set fresh here (0) the first time a row is created.
 const upsertPendingDirectoryStmt = db.prepare(`
   INSERT INTO directory_comparison_nodes
-    (path, parent_path, depth, own_outcome, has_unreadable_entries, directory_checksum, own_finished_at)
-  VALUES (@path, @parentPath, @depth, 'pending', 0, NULL, NULL)
+    (path, parent_path, depth, own_outcome, has_unreadable_entries, directory_checksum, own_finished_at, resolved_by_pass2)
+  VALUES (@path, @parentPath, @depth, 'pending', 0, NULL, NULL, 0)
   ON CONFLICT(path) DO UPDATE SET
     parent_path = excluded.parent_path,
     depth = excluded.depth,
@@ -148,7 +154,7 @@ const recordChecksumsStmt = db.prepare(`
 
 const recordDirectoryChecksumStmt = db.prepare(`
   UPDATE directory_comparison_nodes
-  SET directory_checksum = @checksum
+  SET directory_checksum = @checksum, resolved_by_pass2 = 1
   WHERE path = @path
 `);
 
@@ -172,7 +178,7 @@ const clearFileChecksumsInSubtreeStmt = db.prepare(`
 
 const clearDirChecksumsInSubtreeStmt = db.prepare(`
   UPDATE directory_comparison_nodes
-  SET directory_checksum = NULL
+  SET directory_checksum = NULL, resolved_by_pass2 = 0
   WHERE path = @path OR path LIKE @likePattern ESCAPE '\\'
 `);
 

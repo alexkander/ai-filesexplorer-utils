@@ -15,7 +15,15 @@ since a pane can be browsed independently of any comparison ever having run
 ```json
 {
   "entries": [
-    { "name": "photos", "type": "directory" },
+    {
+      "name": "photos",
+      "type": "directory",
+      "sizeInfo": {
+        "fileCount": 42,
+        "totalSize": 104857600,
+        "incomplete": false
+      }
+    },
     { "name": "notes.txt", "type": "file", "size": 4096 }
   ],
   "hasMore": false
@@ -25,6 +33,16 @@ since a pane can be browsed independently of any comparison ever having run
 **Response `404`**: `path` does not exist or is not a directory.
 
 **Response `403`**: `path` exists but could not be read.
+
+`sizeInfo` (added post-implementation, spec FR-019, user request) is present
+only on directory entries, and only when the Count and Size tool has scanned
+that exact path — a read-only overlay from that tool's own database
+(`contracts/size-info-port-contract.md`). Absent (not `null`, simply omitted)
+for a directory Count and Size has never touched, or when its database doesn't
+exist at all — never an error for this endpoint. `sizeInfo.incomplete` mirrors
+Count and Size's own "incomplete" flag: `true` if any directory in that measured
+subtree hasn't finished scanning successfully, so this overlay doesn't present a
+partial count as final.
 
 ## `GET /api/directory-comparison/status?left=...&right=...`
 
@@ -38,6 +56,7 @@ overall pass progress — used for the initial view and for polling while
 {
   "passActive": "structural",
   "activePath": { "pass": "structural", "path": "/a/photos/2019" },
+  "activePair": { "leftRoot": "/a", "rightRoot": "/b" },
   "entries": [
     { "name": "photos", "kind": "directory", "status": "scanning" },
     { "name": "notes.txt", "kind": "file", "status": "matching" },
@@ -68,6 +87,15 @@ currently-viewed pair, so the UI can show real progress regardless of
 navigation. For `pass: "comparison"`, `left`/`right` point at whatever the most
 specific active unit is — a directory pair, or (research.md Decision 3's
 addendum) an exact file pair once that file's content is actually being read.
+
+`activePair` (added post-implementation, research.md Decision 16) is
+`{ leftRoot: string; rightRoot: string } | null` — the actual roots of whichever
+"Compare" `ComparisonQueue` is currently running (Pass 1 _or_ Pass 2), `null`
+exactly when `activePath` is `null`. Lets the UI compute `activePath` relative
+to a stable base even when the user has navigated a pane away from the
+directories actually being compared — computing it relative to `left`/`right`
+instead would make the indicator disappear the moment the pane's own path
+stopped containing the active work.
 
 ## `POST /api/directory-comparison/compare`
 

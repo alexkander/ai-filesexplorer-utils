@@ -320,6 +320,13 @@ every other entry shows "Matching".
   side. This action MUST require explicit user confirmation before running, and
   MUST refuse to run — rather than overwrite, merge, or delete anything — if the
   destination path already exists by the time the copy would start.
+- **FR-019** (added post-implementation, user request): For a directory entry
+  that the Count and Size tool has already scanned, the system MUST show that
+  tool's own aggregated file count and total size as a read-only overlay. This
+  MUST NOT write to the Count and Size tool's database under any circumstance,
+  and the absence of this data (Count and Size has never scanned that exact
+  path, or its database doesn't exist at all) MUST be treated as normal — never
+  as an error affecting this tool's own listing.
 
 ### Key Entities
 

@@ -23,3 +23,8 @@ export function getName(path: string): string {
 export function joinChildPath(parentPath: string, name: string): string {
   return parentPath === '/' ? `/${name}` : `${parentPath}/${name}`;
 }
+
+/** True if `path` is `root` itself or anywhere within `root`'s subtree. */
+export function isWithinSubtree(path: string, root: string): boolean {
+  return path === root || path.startsWith(root === '/' ? '/' : root + '/');
+}

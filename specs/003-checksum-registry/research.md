@@ -479,3 +479,185 @@ would be a real overwrite of a Principle-V-protected kind). Reusing
 `FileSystemPort` is shared with Count and Size, which has no use for a write
 capability at all; adding it there would violate interface segregation,
 Constitution Principle III, for the sake of avoiding one small new port).
+
+## Decision 15: Stop (FR-013) — two independent bugs found and fixed post-implementation
+
+**Bug 1 — cancellation never reached an in-progress file's checksum read**:
+`compare-subtree.ts`'s `isCancelled()` callback (its original form) was only
+checked between pairs — at the top of `compareSubtree` and before each loop
+iteration — never inside `compareFilePair`'s own cascade loop or during the
+`await` on a `ChecksumPort` call. Found via manual verification: comparing two 5
+GB identical files, pressing Stop mid-hash had **zero** effect — the compare ran
+to completion (several more seconds) as if Stop had never been pressed. **Fix**:
+replaced the boolean callback with a real `AbortSignal`, threaded all the way
+into `ChecksumPort.computePartialChecksum`/`computeFullChecksum`
+(`infrastructure/directory-comparison/checksum-adapter.ts` passes it straight to
+`fs.createReadStream`'s own `signal` option, which destroys the stream and
+rejects immediately on abort). `comparisonPassWorker.run()` now owns an
+`AbortController` per run, aborted by `requestStop`. `compare-subtree.ts`'s
+`computeStageOrError` distinguishes an abort-caused rejection from a genuine
+read failure via `signal.aborted`, so a cancelled file is never falsely flagged
+with `hasReadError` (FR-011 is about real I/O failures, not Stop).
+
+**Bug 2 — `requestStop` required an exact root-path match**:
+`comparisonPassWorker.requestStop(leftRoot, rightRoot)` compared its arguments
+for exact equality against `activePair`. Since the Stop button's own visibility
+(`get-comparison-view.ts`'s `comparisonActive`) uses a looser `isWithinSubtree`
+check (shows Stop whenever the active path is anywhere within the _currently
+viewed_ pane paths, not only when viewing the exact original roots), a user who
+pressed "Compare" and then navigated a pane up to an ancestor directory would
+see a Stop button that silently did nothing when clicked. **Fix**: `requestStop`
+(and `stop-comparison.ts`'s `pass2WasActive` computation, for a consistent
+`{ stopped: boolean }` response) now use the same `isWithinSubtree`-based,
+either-side-qualifies check the button's visibility already used — added
+`isWithinSubtree` to `domain/scanning/path-info.ts` as a shared utility
+(previously duplicated locally in `get-comparison-view.ts` and
+`directory-comparison-explorer.tsx`; both now import it instead).
+
+**Side effect surfaced by Bug 1's fix, found and fixed in the same pass**: once
+Stop could actually interrupt a directory pair mid-comparison, a genuinely new
+issue became easy to trigger: the cancelled (or simply not-yet-reached, in a
+still-running compare) directory showed `Differs` instead of `Not compared`.
+Root cause: `directoryChecksum === null` was being treated as synonymous with
+"confirmed Differs" in `get-comparison-view.ts`, but it's also the value for a
+pair Pass 2 has never actually concluded anything about — the schema had no way
+to distinguish the two. **Fix**: added `resolvedByPass2: boolean` to
+`DirectoryComparisonNode` (`resolved_by_pass2` column, migrated via
+`ALTER TABLE` for existing databases), set `true` by `recordDirectoryChecksum`
+(called for both the Matching and Differs outcomes), left untouched by Pass 1
+relistings (sticky, per FR-016 — a fresh listing shouldn't erase Pass 2's last
+real conclusion), and reset to `false` only by `clearChecksumsInSubtree`
+(`mode: 'full'`) or when a row is first created. `get-comparison-view.ts` now
+checks `resolvedByPass2` before falling back to the `directoryChecksum`
+matching/differs comparison.
+
+**Rationale**: All three fixes directly serve FR-013 ("using it MUST cancel
+further processing... without losing already-computed results") and FR-014's
+"unresolved entries left in their prior status" — none of this was reachable as
+clearly before Bug 1's fix made Stop responsive enough to actually observe
+mid-file cancellation in practice.
+
+**Alternatives considered**: For Bug 2, making the Stop button's visibility
+check exact-match too (rejected — that changes user-facing behavior for the
+worse: today's looser matching is what lets a user navigate up a level while
+comparing and still stop it, which is the more useful default). For the
+`resolvedByPass2` fix, deriving "confirmed Differs vs. never compared" at read
+time by recursively inspecting descendants instead of persisting a flag
+(rejected — would require an unbounded-depth query on every `GET /status` call
+just to render one directory entry's dot color; the flag costs one extra column
+and is set for free at the same moment `recordDirectoryChecksum` already runs).
+
+## Decision 16: `activePath` shown relative to the comparison's own roots, not the viewed panes' paths
+
+**Decision (added post-implementation, user request)**: Decision 3's addendum
+(per-pane relative active-path display) originally computed each pane's relative
+path against that pane's own currently-displayed directory
+(`leftPath`/`rightPath`) — meaning the indicator disappeared entirely the moment
+the user navigated a pane away from the directories actually being compared
+(e.g. to browse something else while a large "Compare" runs in the background).
+Fixed by exposing the comparison's own roots directly: a new
+`ComparisonQueue.getActivePair(): { leftRoot; rightRoot } | null` (the pair
+`runOne` is currently processing — spans both Pass 1 and Pass 2, unlike
+`structuralScanWorker`'s or `comparisonPassWorker`'s own narrower per-pass
+state), threaded through `getComparisonView` as a new `activePair` field on
+`ComparisonView`. `directory-comparison-explorer.tsx`'s `activePathForSide` now
+computes each side's relative path against `activePair.leftRoot`/ `rightRoot`
+unconditionally, never against the pane's own path — so the indicator stays
+visible and accurate regardless of navigation on either side.
+
+**Rationale**: The whole point of this indicator (Decision 3's addendum) was to
+answer "is it actually doing something, and where" without requiring the user to
+stay parked on the exact directories being compared — gating it on the viewed
+pane's own path defeated that purpose for the most common case where it matters
+(a long-running compare on a large tree, browsed away from during the wait).
+
+**Alternatives considered**: Keeping the pane-relative computation as a fallback
+when the viewed path happens to match (rejected — added complexity for no
+benefit; showing the same value regardless of navigation is simpler and equally
+correct, since `activePair` is authoritative either way).
+
+## Decision 17: Read-only Count and Size overlay via a second, separate SQLite connection
+
+**Decision (added post-implementation, user request)**: Directory entries now
+show Count and Size's own aggregated file count/size, when that tool has scanned
+the exact path, as a read-only overlay in `GET /list`'s response. A new port,
+`application/directory-comparison/size-info-port.ts`
+(`getSizeInfo(path): SizeInfo | null`), implemented by
+`infrastructure/directory-comparison/count-and-size-readonly-adapter.ts`, which
+opens a **second** `better-sqlite3` connection directly to
+`COUNT_AND_SIZE_DB_PATH` (same env var/default path Count and Size's own
+`sqlite-client.ts` uses) with `{ readonly: true, fileMustExist: true }`.
+`list-directory.ts` calls it once per directory entry on the returned page. The
+aggregation query (recursive CTE summing `direct_file_count`/ `direct_file_size`
+over the subtree, plus a `MIN(...)` trick for the `incomplete` flag) is written
+directly in the adapter rather than importing
+`domain/count-and-size/derive-directory-view.ts` — a deliberate, small
+duplication of ~15 lines to avoid a cross-feature-slice dependency (every other
+tool boundary in this codebase only shares the intentionally-generic
+`domain/scanning` module; `derive-directory-view.ts` is Count-and-Size-specific
+by both name and by operating on that tool's own `DirectoryScanNode` shape).
+
+**Rationale**: `readonly: true` is enforced by the SQLite driver itself, not
+merely by this adapter's code never issuing a write statement — the strongest
+guarantee available for the user's explicit "solo lectura" requirement, and
+verified directly (a write attempt against a `{readonly:true}` connection throws
+`SQLITE_READONLY`, confirmed during manual verification). Opening a plain second
+connection (rather than, say, routing through Count and Size's own
+application/domain layers) keeps this a pure infrastructure-layer integration
+between two independent SQLite files — consistent with how this whole feature
+already keeps its own database (`data/directory-comparison.sqlite`) entirely
+separate from Count and Size's (FR-015/Decision 1). A missing Count-and-Size
+database (never run yet) is caught at module load and degrades to a no-op port
+(`getSizeInfo` always returns `null`) rather than crashing this tool.
+
+**Alternatives considered**: Importing `deriveDirectoryView`/
+`DirectoryScanNode` from `domain/count-and-size/` directly (rejected — a
+cross-feature-slice domain import breaks the per-tool-independence convention
+this codebase has followed throughout, e.g. Decision 13's `FileSystemPort`
+extension and Decision 14's rejection of reusing `FileSystemPort` for `CopyPort`
+both cite the same principle). Writing this as a shared cross-tool module under
+`domain/scanning/` like the tree-walk primitives (rejected —
+`derive-directory-view.ts`'s aggregation logic isn't feature-agnostic the way
+`ScanStack`/`traverseDirectory` are; it's inherently about Count and Size's own
+count/size semantics, so generalizing it for one read-only consumer would be
+over-engineering, Constitution Principle I).
+
+## Decision 18: Stop button visibility/label also made pane-independent, to match Decision 16
+
+**Decision (added post-implementation, user request — "porque no veo el boton de
+stop?")**: Decision 16 made the per-pane `activePath` text unconditionally
+visible regardless of navigation, but left the Stop button's visibility and the
+"Comparing…"/"Listing…"/"Idle" label in `comparison-status-panel.tsx` gated on
+`view.passActive` — which is still scoped to whether the _currently viewed_ pane
+pair is what's active (`isWithinSubtree(activePath, leftPath/rightPath)`). Net
+effect: a user who navigated a pane away from the compared roots (now much more
+likely to happen, precisely because the Decision 16 text stays visible when they
+do) would see "currently processing: X" but the label would say "Idle" and no
+Stop button would render — no way to cancel work they could plainly see was
+running. Fixed in two places:
+
+- `comparison-status-panel.tsx`: both the label and the Stop button's visibility
+  now derive from `view.activePath?.pass` (system-wide, like Decision 16) via a
+  small `currentPass()` helper, instead of the pane-scoped `view.passActive`.
+- `use-comparison-status.ts`'s `stop()`: now POSTs `view.activePair.leftRoot`/
+  `rightRoot` (the comparison's actual roots) instead of the viewed panes'
+  `leftPath`/`rightPath`. Necessary because the button can now be clicked from a
+  pane pair unrelated to the active comparison — sending the viewed pair would
+  hit `stopComparison`'s `isWithinSubtree` guard (Decision 15's Bug 2 fix) and
+  silently no-op, reintroducing the same class of bug Decision 15 fixed, just
+  from a different trigger. Falls back to `leftPath`/`rightPath` only when
+  `activePair` is null (defensive; the button isn't shown in that state anyway).
+
+**Rationale**: The active-path indicator and the Stop control are two views of
+the same fact ("is a comparison running, and can I cancel it") — they must
+agree. Scoping one to the viewed pane and the other to the whole tool inevitably
+produces a state where the UI shows visible progress with no way to act on it.
+
+**Verified**: live, via `curl` against the same `GET /status`/`POST /stop`
+contract the frontend consumes — started a "full" compare on two 4GB identical
+files, polled until `status: "scanning"`, then POSTed `/stop` with the
+comparison's own roots (as the fixed `stop()` now does) while simulating having
+navigated to an unrelated pane pair. Returned `{"stopped": true}` in ~20ms, and
+a follow-up `GET /status` for the compared pair showed `not_compared` (not a
+false "differs" — Decision 15's `resolvedByPass2` fix still holds). `pnpm lint`
+and `pnpm build` also pass.

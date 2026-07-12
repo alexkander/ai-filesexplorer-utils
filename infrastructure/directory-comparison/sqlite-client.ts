@@ -21,7 +21,8 @@ db.exec(`
     own_outcome TEXT NOT NULL,
     has_unreadable_entries INTEGER NOT NULL DEFAULT 0,
     directory_checksum TEXT,
-    own_finished_at TEXT
+    own_finished_at TEXT,
+    resolved_by_pass2 INTEGER NOT NULL DEFAULT 0
   );
 
   CREATE INDEX IF NOT EXISTS idx_directory_comparison_nodes_parent_path
@@ -41,3 +42,19 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_file_checksums_parent_path
     ON file_checksums (parent_path);
 `);
+
+// `CREATE TABLE IF NOT EXISTS` above doesn't add columns to a table that
+// already existed before this field was introduced — migrate it separately,
+// ignoring the "duplicate column" error on every run after the first.
+try {
+  db.exec(
+    `ALTER TABLE directory_comparison_nodes ADD COLUMN resolved_by_pass2 INTEGER NOT NULL DEFAULT 0`,
+  );
+} catch (error) {
+  if (
+    !(error instanceof Error) ||
+    !error.message.includes('duplicate column')
+  ) {
+    throw error;
+  }
+}

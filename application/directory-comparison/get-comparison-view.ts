@@ -6,7 +6,7 @@ import {
   type EntryComparisonStatus,
   type PairableEntry,
 } from '@/domain/directory-comparison/entry-comparison-result';
-import { getName } from '@/domain/scanning/path-info';
+import { getName, isWithinSubtree } from '@/domain/scanning/path-info';
 
 export type PassActive = 'structural' | 'comparison' | null;
 
@@ -21,11 +21,14 @@ export interface ComparisonView {
     | { pass: 'structural'; path: string }
     | { pass: 'comparison'; left: string; right: string }
     | null;
+  /** The comparison's own roots (whichever pair `ComparisonQueue` is
+   * currently running Pass 1 or Pass 2 for), independent of `leftPath`/
+   * `rightPath` — added post-implementation so the UI can show
+   * `activePath` relative to a stable base even when the panes have
+   * navigated away from the directories actually being compared
+   * (research.md Decision 16). `null` exactly when `activePath` is `null`. */
+  activePair: { leftRoot: string; rightRoot: string } | null;
   entries: EntryComparisonResult[];
-}
-
-function isWithinSubtree(path: string, root: string): boolean {
-  return path === root || path.startsWith(root === '/' ? '/' : root + '/');
 }
 
 /**
@@ -48,6 +51,7 @@ export async function getComparisonView(
   comparisonRepository: ComparisonRepositoryPort,
   structuralActivePath: string | null,
   comparisonActivePath: { left: string; right: string } | null,
+  activePair: { leftRoot: string; rightRoot: string } | null,
 ): Promise<ComparisonView> {
   const [leftListing, rightListing] = await Promise.all([
     fileSystem.listChildren(leftPath),
@@ -161,6 +165,16 @@ export async function getComparisonView(
       if (leftNode.ownOutcome !== 'done' || rightNode.ownOutcome !== 'done') {
         return { name: pair.name, kind, status: 'not_compared' };
       }
+      // `directoryChecksum === null` alone does NOT mean "confirmed
+      // differs" — it's also the value for a pair Pass 2 has never actually
+      // reached (not yet gotten here in a still-running compare, or
+      // interrupted by Stop before concluding anything). `resolvedByPass2`
+      // is the actual signal for "Pass 2 concluded something here at least
+      // once" (found missing post-implementation — this used to show a
+      // false `differs` for entries that had never really been compared).
+      if (!leftNode.resolvedByPass2 || !rightNode.resolvedByPass2) {
+        return { name: pair.name, kind, status: 'not_compared' };
+      }
       const status: EntryComparisonStatus =
         leftNode.directoryChecksum !== null &&
         leftNode.directoryChecksum === rightNode.directoryChecksum
@@ -212,5 +226,10 @@ export async function getComparisonView(
     };
   });
 
-  return { passActive, activePath, entries };
+  return {
+    passActive,
+    activePath,
+    activePair: activePath !== null ? activePair : null,
+    entries,
+  };
 }

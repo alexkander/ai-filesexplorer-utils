@@ -13,6 +13,7 @@ import {
   COMPARISON_STATUS_COLORS,
   COMPARISON_STATUS_LABELS,
 } from './comparison-status-colors';
+import { humanizeSize, exactBytesLabel } from './format-size';
 
 const PAGE_SIZE = 200;
 
@@ -183,6 +184,24 @@ export function ComparisonPane({
                     {entry.name}
                   </span>
                 </>
+              )}
+              {entry.type === 'directory' && entry.sizeInfo && (
+                <span
+                  className="shrink-0 text-xs text-muted-foreground"
+                  title={exactBytesLabel(entry.sizeInfo.totalSize)}
+                >
+                  {entry.sizeInfo.fileCount.toLocaleString()} files,{' '}
+                  {humanizeSize(entry.sizeInfo.totalSize)}
+                  {entry.sizeInfo.incomplete && (
+                    <span
+                      className="text-amber-600 dark:text-amber-500"
+                      title="Count and Size's own scan of this directory hasn't fully completed — this total may be partial"
+                    >
+                      {' '}
+                      (partial)
+                    </span>
+                  )}
+                </span>
               )}
               {status && (
                 <span

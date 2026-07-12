@@ -9,6 +9,17 @@ const PASS_LABELS: Record<NonNullable<ComparisonView['passActive']>, string> = {
   comparison: 'Comparing…',
 };
 
+// Derived from view.activePath (system-wide) rather than view.passActive
+// (scoped to whether the currently-viewed pane pair is what's active) — a
+// comparison running on a different pair must still show "Comparing…" and
+// offer Stop, otherwise the always-visible per-pane active-path text (see
+// research.md Decision 16) contradicts an "Idle" label with no way to cancel.
+function currentPass(
+  view: ComparisonView | null,
+): 'structural' | 'comparison' | null {
+  return view?.activePath?.pass ?? null;
+}
+
 export function ComparisonStatusPanel({
   view,
   starting,
@@ -43,14 +54,17 @@ export function ComparisonStatusPanel({
         <RefreshCw className="size-4" aria-hidden="true" />
         Force full re-compare
       </Button>
-      {view?.passActive && (
+      {currentPass(view) && (
         <Button variant="outline" size="sm" onClick={onStop}>
           Stop
         </Button>
       )}
       {view && (
         <span className="font-medium">
-          {view.passActive ? PASS_LABELS[view.passActive] : 'Idle'}
+          {(() => {
+            const pass = currentPass(view);
+            return pass ? PASS_LABELS[pass] : 'Idle';
+          })()}
         </span>
       )}
     </div>

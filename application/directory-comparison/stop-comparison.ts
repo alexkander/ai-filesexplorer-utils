@@ -1,5 +1,6 @@
 import type { ComparisonRepositoryPort } from './comparison-repository-port';
 import type { ScanSchedulerPort } from '@/application/scanning/scan-scheduler-port';
+import { isWithinSubtree } from '@/domain/scanning/path-info';
 
 export interface ComparisonPassStopPort {
   requestStop(leftRoot: string, rightRoot: string): void;
@@ -18,9 +19,15 @@ export function stopComparison(
   structuralScheduler: ScanSchedulerPort,
   comparisonPassWorker: ComparisonPassStopPort,
 ): { stopped: boolean } {
+  // Either side qualifying is enough — matches comparisonPassWorker's own
+  // requestStop logic and get-comparison-view.ts's Stop-button visibility
+  // check (both use the same "is the active root within what's being
+  // stopped" test), not an exact-match requirement.
+  const activePair = comparisonPassWorker.getActivePair();
   const pass2WasActive =
-    comparisonPassWorker.getActivePair()?.leftRoot === leftPath &&
-    comparisonPassWorker.getActivePair()?.rightRoot === rightPath;
+    activePair !== null &&
+    (isWithinSubtree(activePair.leftRoot, leftPath) ||
+      isWithinSubtree(activePair.rightRoot, rightPath));
 
   structuralScheduler.requestStop(leftPath);
   structuralScheduler.requestStop(rightPath);

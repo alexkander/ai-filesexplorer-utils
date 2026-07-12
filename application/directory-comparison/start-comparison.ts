@@ -45,6 +45,7 @@ async function waitUntilFullyListed(
 export class ComparisonQueue {
   private queue: QueuedCompare[] = [];
   private running = false;
+  private activePair: { leftRoot: string; rightRoot: string } | null = null;
 
   constructor(
     private comparisonRepository: ComparisonRepositoryPort,
@@ -55,6 +56,16 @@ export class ComparisonQueue {
   start(leftPath: string, rightPath: string, mode: ScanMode): void {
     this.queue.push({ leftPath, rightPath, mode });
     void this.runLoop();
+  }
+
+  /** The pair currently being processed (Pass 1 OR Pass 2 — spans both,
+   * unlike `structuralScheduler`'s or `comparisonPassWorker`'s own
+   * per-pass state), so the UI can show progress relative to the
+   * comparison's own roots regardless of which pass is active and
+   * regardless of what the panes currently display (added
+   * post-implementation — see research.md Decision 16). */
+  getActivePair(): { leftRoot: string; rightRoot: string } | null {
+    return this.activePair;
   }
 
   private async runLoop(): Promise<void> {
@@ -71,34 +82,43 @@ export class ComparisonQueue {
   }
 
   private async runOne({ leftPath, rightPath, mode }: QueuedCompare) {
-    if (mode === 'full') {
-      this.comparisonRepository.clearChecksumsInSubtree(leftPath);
-      if (rightPath !== leftPath) {
-        this.comparisonRepository.clearChecksumsInSubtree(rightPath);
+    this.activePair = { leftRoot: leftPath, rightRoot: rightPath };
+    try {
+      if (mode === 'full') {
+        this.comparisonRepository.clearChecksumsInSubtree(leftPath);
+        if (rightPath !== leftPath) {
+          this.comparisonRepository.clearChecksumsInSubtree(rightPath);
+        }
       }
-    }
 
-    // Pass 1 always relists unconditionally — no `doneSet`, always 'full'
-    // (research.md Decision 11); the user's incremental/full choice only
-    // applies to Pass 2 below.
-    this.comparisonRepository.upsertPendingDirectory(
-      leftPath,
-      getParentPath(leftPath),
-      getDepth(leftPath),
-    );
-    this.structuralScheduler.enqueue(leftPath, 'full');
-    if (rightPath !== leftPath) {
+      // Pass 1 always relists unconditionally — no `doneSet`, always 'full'
+      // (research.md Decision 11); the user's incremental/full choice only
+      // applies to Pass 2 below.
       this.comparisonRepository.upsertPendingDirectory(
-        rightPath,
-        getParentPath(rightPath),
-        getDepth(rightPath),
+        leftPath,
+        getParentPath(leftPath),
+        getDepth(leftPath),
       );
-      this.structuralScheduler.enqueue(rightPath, 'full');
+      this.structuralScheduler.enqueue(leftPath, 'full');
+      if (rightPath !== leftPath) {
+        this.comparisonRepository.upsertPendingDirectory(
+          rightPath,
+          getParentPath(rightPath),
+          getDepth(rightPath),
+        );
+        this.structuralScheduler.enqueue(rightPath, 'full');
+      }
+
+      await waitUntilFullyListed(
+        leftPath,
+        rightPath,
+        this.comparisonRepository,
+      );
+
+      await this.comparisonPassWorker.run(leftPath, rightPath, mode);
+    } finally {
+      this.activePair = null;
     }
-
-    await waitUntilFullyListed(leftPath, rightPath, this.comparisonRepository);
-
-    await this.comparisonPassWorker.run(leftPath, rightPath, mode);
   }
 }
 

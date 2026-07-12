@@ -26,7 +26,13 @@ export interface CompareSubtreeDeps {
 
 export interface CompareSubtreeOptions {
   mode: ScanMode;
-  isCancelled: () => boolean;
+  /** Checked between pairs (as before) AND passed straight through to
+   * `ChecksumPort` so an in-progress file read can be aborted mid-stream
+   * (found necessary post-implementation: Stop previously had no effect
+   * on whichever single file was actively being hashed when pressed — it
+   * could only cancel pairs that hadn't started yet — so a large/slow file
+   * made Stop look broken for however long that one file took). */
+  signal: AbortSignal;
   /** Called with the most specific unit of work currently active: a
    * directory pair when `compareSubtree` starts resolving it, or a file
    * pair (added post-implementation — found necessary during manual
@@ -83,7 +89,7 @@ function isCacheStillValid(
   return true;
 }
 
-type FileVerdict = 'matching' | 'differs' | 'error';
+type FileVerdict = 'matching' | 'differs' | 'error' | 'cancelled';
 
 interface FileCompareResult {
   verdict: FileVerdict;
@@ -92,30 +98,39 @@ interface FileCompareResult {
   rightError: boolean;
 }
 
+type StageResult =
+  | { outcome: 'value'; value: string }
+  | { outcome: 'error' }
+  | { outcome: 'cancelled' };
+
 async function computeStageOrError(
   checksumPort: ChecksumPort,
   comparisonRepository: ComparisonRepositoryPort,
   file: FileChecksumEntry,
   stage: 'need_partial' | 'need_full',
-): Promise<string | null> {
+  signal: AbortSignal,
+): Promise<StageResult> {
+  if (signal.aborted) return { outcome: 'cancelled' };
   try {
     const value =
       stage === 'need_partial'
-        ? await checksumPort.computePartialChecksum(file.path)
-        : await checksumPort.computeFullChecksum(file.path);
+        ? await checksumPort.computePartialChecksum(file.path, signal)
+        : await checksumPort.computeFullChecksum(file.path, signal);
     comparisonRepository.recordChecksums(
       file.path,
       stage === 'need_partial'
         ? { partialChecksum: value }
         : { fullChecksum: value },
     );
-    return value;
+    return { outcome: 'value', value };
   } catch {
-    // Flags this SPECIFIC file (FR-011) — distinct from a sibling file's
-    // status, unlike the directory-level hasUnreadableEntries flag the
-    // caller separately propagates for the enclosing directory (FR-011a).
+    // A Stop mid-read surfaces here as a rejected promise too (the stream's
+    // 'error' event fires with an AbortError) — distinguish that from a
+    // genuine read failure so a cancelled file doesn't get falsely flagged
+    // with hasReadError (FR-011 is about real I/O failures, not Stop).
+    if (signal.aborted) return { outcome: 'cancelled' };
     comparisonRepository.recordContentReadFailure(file.path);
-    return null;
+    return { outcome: 'error' };
   }
 }
 
@@ -123,13 +138,14 @@ async function computeStageOrError(
  * Cascading comparison for one paired file (research.md Decision 3): loops
  * `checksum-cascade.ts`'s pure decision function, computing/persisting
  * whatever stage it asks for next via `ChecksumPort`, until a verdict is
- * reached or a read failure occurs on either side.
+ * reached, a read failure occurs on either side, or `signal` fires.
  */
 async function compareFilePair(
   leftFile: FileChecksumEntry,
   rightFile: FileChecksumEntry,
   checksumPort: ChecksumPort,
   comparisonRepository: ComparisonRepositoryPort,
+  signal: AbortSignal,
   onProgress?: (leftPath: string, rightPath: string) => void,
 ): Promise<FileCompareResult> {
   let left: FileCascadeSide = {
@@ -166,24 +182,42 @@ async function compareFilePair(
     let rightError = false;
 
     if (left[key] === null) {
-      const value = await computeStageOrError(
+      const result = await computeStageOrError(
         checksumPort,
         comparisonRepository,
         leftFile,
         step.kind,
+        signal,
       );
-      if (value === null) leftError = true;
-      else left = { ...left, [key]: value };
+      if (result.outcome === 'cancelled') {
+        return {
+          verdict: 'cancelled',
+          checksum: null,
+          leftError: false,
+          rightError: false,
+        };
+      }
+      if (result.outcome === 'error') leftError = true;
+      else left = { ...left, [key]: result.value };
     }
     if (right[key] === null) {
-      const value = await computeStageOrError(
+      const result = await computeStageOrError(
         checksumPort,
         comparisonRepository,
         rightFile,
         step.kind,
+        signal,
       );
-      if (value === null) rightError = true;
-      else right = { ...right, [key]: value };
+      if (result.outcome === 'cancelled') {
+        return {
+          verdict: 'cancelled',
+          checksum: null,
+          leftError: false,
+          rightError: false,
+        };
+      }
+      if (result.outcome === 'error') rightError = true;
+      else right = { ...right, [key]: result.value };
     }
 
     if (leftError || rightError) {
@@ -210,7 +244,7 @@ export async function compareSubtree(
   deps: CompareSubtreeDeps,
   options: CompareSubtreeOptions,
 ): Promise<CompareSubtreeResult> {
-  if (options.isCancelled()) return CANCELLED_RESULT;
+  if (options.signal.aborted) return CANCELLED_RESULT;
   options.onProgress?.(leftNode.path, rightNode.path);
 
   const { comparisonRepository, checksumPort } = deps;
@@ -279,7 +313,7 @@ export async function compareSubtree(
   const childDescriptors: ChildDescriptor[] = [];
 
   for (const pair of pairs) {
-    if (options.isCancelled()) return CANCELLED_RESULT;
+    if (options.signal.aborted) return CANCELLED_RESULT;
 
     if (!pair.left || !pair.right || pair.left.kind !== pair.right.kind) {
       allMatching = false;
@@ -315,8 +349,10 @@ export async function compareSubtree(
         rightFile,
         checksumPort,
         comparisonRepository,
+        options.signal,
         options.onProgress,
       );
+      if (result.verdict === 'cancelled') return CANCELLED_RESULT;
       leftHasError = leftHasError || result.leftError;
       rightHasError = rightHasError || result.rightError;
       if (result.verdict === 'matching' && result.checksum !== null) {

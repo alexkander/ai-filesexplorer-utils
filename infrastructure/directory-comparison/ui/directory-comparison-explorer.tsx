@@ -9,7 +9,7 @@ import {
   useComparisonStatus,
   type ComparisonView,
 } from './use-comparison-status';
-import { getParentPath } from '@/domain/scanning/path-info';
+import { getParentPath, isWithinSubtree } from '@/domain/scanning/path-info';
 import type { EntryComparisonStatus } from '@/domain/directory-comparison/entry-comparison-result';
 import {
   loadPanes,
@@ -21,30 +21,32 @@ function childPath(currentPath: string, name: string): string {
   return currentPath === '/' ? `/${name}` : `${currentPath}/${name}`;
 }
 
-function isWithinSubtree(path: string, root: string): boolean {
-  return path === root || path.startsWith(root === '/' ? '/' : root + '/');
-}
-
 function toRelative(path: string, root: string): string {
   if (path === root) return '.';
   return root === '/' ? path.slice(1) : path.slice(root.length + 1);
 }
 
-/** The active path for `side`, relative to that pane's own current
- * directory (`paneRootPath`) — `null` if nothing's active, or the active
- * unit isn't within this pane's currently-shown subtree at all (e.g. a
- * queued comparison for a different pair, or Move sync has the two panes
- * looking at unrelated trees). */
+/** The active path for `side`, relative to the comparison's OWN root for
+ * that side (`activePair`) — deliberately NOT relative to (or gated by)
+ * whatever the pane currently displays, so it keeps showing even if the
+ * user has navigated a pane away from the directories actually being
+ * compared (found necessary post-implementation: the original version only
+ * showed this when the pane's own path happened to contain the active
+ * work, so navigating elsewhere made it disappear entirely). For the
+ * structural pass, the single active path could belong to either root —
+ * checked against this specific side's root to decide whether it applies
+ * here. */
 function activePathForSide(
   activePath: ComparisonView['activePath'],
+  activePair: ComparisonView['activePair'],
   side: 'left' | 'right',
-  paneRootPath: string,
 ): string | null {
-  if (!activePath) return null;
+  if (!activePath || !activePair) return null;
+  const root = side === 'left' ? activePair.leftRoot : activePair.rightRoot;
   const candidate =
     activePath.pass === 'structural' ? activePath.path : activePath[side];
-  if (!isWithinSubtree(candidate, paneRootPath)) return null;
-  return toRelative(candidate, paneRootPath);
+  if (!isWithinSubtree(candidate, root)) return null;
+  return toRelative(candidate, root);
 }
 
 /**
@@ -85,13 +87,13 @@ export function DirectoryComparisonExplorer() {
 
   const leftActivePath = activePathForSide(
     view?.activePath ?? null,
+    view?.activePair ?? null,
     'left',
-    leftPath,
   );
   const rightActivePath = activePathForSide(
     view?.activePath ?? null,
+    view?.activePair ?? null,
     'right',
-    rightPath,
   );
 
   const leftStatusByName = new Map<string, EntryComparisonStatus>();

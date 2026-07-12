@@ -12,6 +12,14 @@ import type { ScanNodeStatus } from '@/domain/scanning/scan-node-status';
 
 interface DirectoryComparisonNode extends ScanNodeStatus {
   directoryChecksum: string | null;
+  // true once Pass 2 has concluded something for this pair at least once
+  // (Matching or Differs) — distinguishes "confirmed Differs" from "Pass 2
+  // never actually reached this pair," both of which leave
+  // directoryChecksum null. Sticky across Pass 1 relistings; reset only by
+  // clearChecksumsInSubtree or on first row creation. Added post-implementation
+  // (found missing: read-time derivation was showing a false Differs for
+  // never-actually-compared entries).
+  resolvedByPass2: boolean;
 }
 
 interface FileChecksumEntry {
@@ -68,7 +76,9 @@ interface ComparisonRepositoryPort {
     path: string,
     checksums: { partialChecksum?: string; fullChecksum?: string },
   ): void;
-  recordDirectoryChecksum(path: string, checksum: string | null): void; // null clears a stale value (e.g. a child changed)
+  // null clears a stale value (e.g. a child changed) — either way, marks
+  // resolvedByPass2 = true.
+  recordDirectoryChecksum(path: string, checksum: string | null): void;
 
   // Pass 2 only. Called with a FILE's own path: sets that file's
   // hasReadError. Called with a DIRECTORY's own path (propagating up the
@@ -81,9 +91,10 @@ interface ComparisonRepositoryPort {
 
   // Pass 2 only, `mode: 'full'` (research.md Decision 11): clears
   // partialChecksum/fullChecksum on every file_checksums row and
-  // directoryChecksum on every directory_comparison_nodes row in the given
-  // subtree, forcing the cascade to redo everything on both sides. Called
-  // once per root by start-comparison.ts before Pass 2 runs.
+  // directoryChecksum + resolvedByPass2 on every directory_comparison_nodes
+  // row in the given subtree, forcing the cascade to redo everything on
+  // both sides. Called once per root by start-comparison.ts before Pass 2
+  // runs.
   clearChecksumsInSubtree(path: string): void;
 }
 ```

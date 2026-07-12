@@ -84,11 +84,18 @@ export function useComparisonStatus(leftPath: string, rightPath: string) {
     }
   };
 
+  // Targets view.activePair (the roots the running comparison actually owns)
+  // rather than leftPath/rightPath (the currently-viewed pane pair) — the Stop
+  // button is now shown whenever anything is active anywhere in the tool
+  // (see isActive above), so a click must be able to reach a comparison whose
+  // roots differ from whatever the panes currently show.
   const stop = async () => {
+    const targetLeft = view?.activePair?.leftRoot ?? leftPath;
+    const targetRight = view?.activePair?.rightRoot ?? rightPath;
     await fetch('/api/directory-comparison/stop', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ leftPath, rightPath }),
+      body: JSON.stringify({ leftPath: targetLeft, rightPath: targetRight }),
     });
     applyView(await fetchStatus(leftPath, rightPath));
   };

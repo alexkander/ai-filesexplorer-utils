@@ -2,6 +2,18 @@ import type { ScanNodeStatus } from '@/domain/scanning/scan-node-status';
 
 export interface DirectoryComparisonNode extends ScanNodeStatus {
   directoryChecksum: string | null;
+  /** `true` once Pass 2 has concluded *something* for this directory pair at
+   * least once (matching or differs) — added post-implementation to fix a
+   * bug: `directoryChecksum === null` alone doesn't distinguish "genuinely
+   * resolved as differing" from "never actually reached by Pass 2" (e.g.
+   * cancelled by Stop, or simply not yet processed in a still-running
+   * compare), so read-time derivation was showing a false `differs` for
+   * entries that had never actually been compared. Sticky across Pass 1
+   * relistings (preserves the last real Pass 2 conclusion, per FR-016's
+   * "show precomputed status" precedent) — only reset to `false` by
+   * `clearChecksumsInSubtree` (`mode: 'full'`) or when a brand-new row is
+   * first created. */
+  resolvedByPass2: boolean;
 }
 
 export interface FileChecksumEntry {
@@ -60,7 +72,10 @@ export interface ComparisonRepositoryPort {
     path: string,
     checksums: { partialChecksum?: string; fullChecksum?: string },
   ): void;
-  recordDirectoryChecksum(path: string, checksum: string | null): void; // null clears a stale value (e.g. a child changed)
+  // null clears a stale value (e.g. a child changed) — either way, marks
+  // resolvedByPass2 = true, since this call itself IS the conclusion
+  // (matching if checksum is set, differs if null).
+  recordDirectoryChecksum(path: string, checksum: string | null): void;
 
   // Pass 2 only. Called with a FILE's own path: sets that file's
   // hasReadError. Called with a DIRECTORY's own path (propagating up the
@@ -72,6 +87,9 @@ export interface ComparisonRepositoryPort {
   recordContentReadFailure(path: string): void;
 
   // Pass 2 only, `mode: 'full'` (research.md Decision 11): clears every
-  // cached checksum in both subtrees before Pass 2 re-derives them.
+  // cached checksum in both subtrees before Pass 2 re-derives them, and
+  // resets resolvedByPass2 to false for every directory in the subtree (a
+  // full re-compare means every entry genuinely goes back to not_compared
+  // until Pass 2 concludes something fresh).
   clearChecksumsInSubtree(path: string): void;
 }
