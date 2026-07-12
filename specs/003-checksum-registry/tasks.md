@@ -385,6 +385,38 @@ incremental vs. force-full and Stop all work (quickstart.md steps 6–16).
 
 ---
 
+## Phase 7: Copy action for "Only on this side" entries (spec FR-018, added post-implementation)
+
+**Purpose**: User-requested addition after the initial implementation — a
+narrow, additive-only write action (research.md Decision 14), the only
+filesystem-writing capability in this otherwise read-only tool.
+
+- [x] T039 [P] Create `application/directory-comparison/copy-port.ts`: the
+      `CopyPort` interface (contracts/copy-port-contract.md).
+- [x] T040 [P] Create `infrastructure/directory-comparison/copy-adapter.ts`
+      implementing `CopyPort` via `fs.promises.cp` (recursive, never overwrites
+      — `errorOnExist: true, force: false`, plus an explicit destination-exists
+      pre-check). (Depends on T039.)
+- [x] T041 Create `application/directory-comparison/copy-entry.ts`: thin use
+      case wrapping `CopyPort.copy`. (Depends on T039.)
+- [x] T042 Create `app/api/directory-comparison/copy/route.ts`: `POST` Route
+      Handler reading `{ sourcePath, destinationPath }`, calling
+      `copy-entry.ts`, mapping `CopyOutcome` to `200`/`404`/`409`/`500`
+      (contracts/directory-comparison-api-contract.md `POST /copy`). (Depends on
+      T040, T041.)
+- [x] T043 Update `infrastructure/directory-comparison/ui/comparison-pane.tsx`:
+      a `side` prop, a Copy button shown only when an entry's status matches
+      this pane's own "only on this side" value, and a `refreshToken` prop so
+      the pane can be told to re-fetch its listing after a copy lands a new
+      entry on it. (Depends on T042.)
+- [x] T044 Update
+      `infrastructure/directory-comparison/ui/directory-comparison-explorer.tsx`:
+      owns the copy flow — `window.confirm()`, the `POST /copy` request, and
+      bumping the destination pane's `refreshToken` on success (spec FR-018).
+      (Depends on T043.)
+
+---
+
 ## Dependencies & Execution Order
 
 ### Phase Dependencies

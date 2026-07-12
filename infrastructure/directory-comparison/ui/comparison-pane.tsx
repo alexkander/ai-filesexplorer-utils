@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { File, Folder } from 'lucide-react';
+import { Copy, File, Folder, Loader2 } from 'lucide-react';
 import { Button } from '@/infrastructure/ui/components/button';
 import { cn } from '@/lib/utils';
 import type {
@@ -34,12 +34,24 @@ async function fetchPage(
   return { status: 'ok', page: (await res.json()) as ListDirectoryResult };
 }
 
+const ONLY_ON_THIS_SIDE: Record<'left' | 'right', EntryComparisonStatus> = {
+  left: 'only_left',
+  right: 'only_right',
+};
+
 export function ComparisonPane({
   path,
+  side,
   onNavigate,
   statusByName,
+  refreshToken,
+  onCopyToOtherSide,
 }: {
   path: string;
+  /** Which pane this is — determines which "only on this side" status
+   * (only_left vs only_right) means "I have this, the other side doesn't"
+   * and should offer a copy button. */
+  side: 'left' | 'right';
   /** Called with the *name* of the subdirectory entered (not the full
    * path) — the parent owns computing the resulting absolute path for both
    * this pane and, if Move sync is on, the other pane's equivalent move. */
@@ -47,12 +59,22 @@ export function ComparisonPane({
   /** From the shared `useComparisonStatus` poll (one per pair, not per
    * pane) — `undefined` before any Compare has ever been pressed. */
   statusByName?: Map<string, EntryComparisonStatus>;
+  /** Bumped by the parent after a copy lands a new entry on this side, to
+   * force a re-fetch of this pane's own listing (which otherwise only
+   * re-fetches when `path` itself changes). */
+  refreshToken?: number;
+  /** Called with the entry name when the user confirms copying an
+   * "only on this side" entry to the other pane's current directory. The
+   * parent owns the confirmation prompt, the actual copy request, and
+   * bumping the destination pane's `refreshToken` afterward. */
+  onCopyToOtherSide?: (name: string) => Promise<void>;
 }) {
   const [entries, setEntries] = useState<ListedEntry[]>([]);
   const [hasMore, setHasMore] = useState(false);
   const [loading, setLoading] = useState(false);
   const [notFound, setNotFound] = useState(false);
   const [error, setError] = useState(false);
+  const [copyingName, setCopyingName] = useState<string | null>(null);
 
   useEffect(() => {
     let ignore = false;
@@ -78,7 +100,17 @@ export function ComparisonPane({
     return () => {
       ignore = true;
     };
-  }, [path]);
+  }, [path, refreshToken]);
+
+  const handleCopy = async (name: string) => {
+    if (!onCopyToOtherSide) return;
+    setCopyingName(name);
+    try {
+      await onCopyToOtherSide(name);
+    } finally {
+      setCopyingName(null);
+    }
+  };
 
   const loadMore = async () => {
     setLoading(true);
@@ -160,6 +192,24 @@ export function ComparisonPane({
                   )}
                   title={COMPARISON_STATUS_LABELS[status]}
                 />
+              )}
+              {status === ONLY_ON_THIS_SIDE[side] && onCopyToOtherSide && (
+                <button
+                  type="button"
+                  onClick={() => void handleCopy(entry.name)}
+                  disabled={copyingName !== null}
+                  className="shrink-0 text-muted-foreground hover:text-foreground disabled:opacity-50"
+                  title={`Copy "${entry.name}" to the other side`}
+                >
+                  {copyingName === entry.name ? (
+                    <Loader2
+                      className="size-4 animate-spin"
+                      aria-label="Copying"
+                    />
+                  ) : (
+                    <Copy className="size-4" aria-hidden="true" />
+                  )}
+                </button>
               )}
             </li>
           );

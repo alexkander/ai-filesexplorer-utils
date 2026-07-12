@@ -93,5 +93,13 @@ export function useComparisonStatus(leftPath: string, rightPath: string) {
     applyView(await fetchStatus(leftPath, rightPath));
   };
 
-  return { view, tick, starting, compare, stop };
+  // For callers that changed the filesystem out-of-band (e.g. a successful
+  // copy) and need the view's "only on this side" statuses to drop away
+  // immediately, instead of waiting for the next poll tick (or never, if no
+  // pass is currently active and isActive's poll isn't running at all).
+  const refetch = async () => {
+    applyView(await fetchStatus(leftPath, rightPath));
+  };
+
+  return { view, tick, starting, compare, stop, refetch };
 }

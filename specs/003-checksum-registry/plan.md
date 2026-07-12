@@ -115,7 +115,8 @@ specs/003-checksum-registry/
 ├── contracts/           # Phase 1 output (/speckit-plan command)
 │   ├── checksum-port-contract.md
 │   ├── comparison-repository-port-contract.md
-│   └── directory-comparison-api-contract.md
+│   ├── directory-comparison-api-contract.md
+│   └── copy-port-contract.md          # Added post-implementation (research.md Decision 14)
 └── tasks.md             # Phase 2 output (/speckit-tasks command - NOT created by /speckit-plan)
 ```
 
@@ -147,8 +148,10 @@ application/
 │   ├── stop-comparison.ts             # Use case: stop whichever pass is active
 │   ├── list-entries.ts                # Pass 1's per-node step: traverseDirectory (shared) + persist direct
 │   │                                   # files' size/mtime + subdirectory rows — no hashing (research.md Decision 3)
-│   └── compare-subtree.ts             # Pass 2: bottom-up (deepest first) cascading comparison over the two
-│                                       # already-listed subtrees; calls ChecksumPort only as the cascade requires
+│   ├── compare-subtree.ts             # Pass 2: bottom-up (deepest first) cascading comparison over the two
+│   │                                   # already-listed subtrees; calls ChecksumPort only as the cascade requires
+│   ├── copy-port.ts                   # CopyPort interface (research.md Decision 14, spec FR-018)
+│   └── copy-entry.ts                  # Use case: thin wrapper over CopyPort.copy() for "Only on this side" entries
 └── scanning/                          # (existing, unchanged) FileSystemPort, ScanSchedulerPort, traverseDirectory
 
 infrastructure/
@@ -164,10 +167,13 @@ infrastructure/
 │   │                                   # serializes whole Pass1+Pass2 pipelines across different "Compare"
 │   │                                   # requests (FR-010), not just one pair's own two roots
 │   ├── panes-storage.ts               # localStorage read/write for left/right paths + Move sync setting
+│   ├── copy-adapter.ts                # Implements CopyPort via fs.promises.cp (recursive, never overwrites)
 │   └── ui/
-│       ├── directory-comparison-explorer.tsx # Owns leftPath/rightPath/moveSync client state; wires the two panes
+│       ├── directory-comparison-explorer.tsx # Owns leftPath/rightPath/moveSync client state; wires the two panes;
+│       │                               # owns the copy confirm/request/refresh-token flow (research.md Decision 14)
 │       ├── comparison-pane.tsx        # One side's listing + pagination + onNavigate (mirrors directory-browser.tsx,
-│       │                               # shows EntryComparisonResult status dot instead of count/size)
+│       │                               # shows EntryComparisonResult status dot instead of count/size, plus a Copy
+│       │                               # button for "Only on this side" entries)
 │       ├── comparison-status-panel.tsx # Compare/Force-full-re-compare/Stop buttons + overall state
 │       ├── comparison-status-colors.ts # Not compared/Matching/Differs/Only-on-this-side/Scanning/Error -> color
 │       └── components/                # Additional shadcn/ui primitives if needed
@@ -186,7 +192,8 @@ app/
         ├── list/route.ts
         ├── status/route.ts
         ├── compare/route.ts
-        └── stop/route.ts
+        ├── stop/route.ts
+        └── copy/route.ts               # POST — the one filesystem-writing route (research.md Decision 14)
 
 domain/navigation/menu-entry.ts        # (existing, edited) + { key: 'directory-comparison', label: 'Compare Directories', route: '/directory-comparison' }
 

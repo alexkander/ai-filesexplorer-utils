@@ -5,7 +5,10 @@ import { FolderUp } from 'lucide-react';
 import { Button } from '@/infrastructure/ui/components/button';
 import { ComparisonPane } from './comparison-pane';
 import { ComparisonStatusPanel } from './comparison-status-panel';
-import { useComparisonStatus } from './use-comparison-status';
+import {
+  useComparisonStatus,
+  type ComparisonView,
+} from './use-comparison-status';
 import { getParentPath } from '@/domain/scanning/path-info';
 import type { EntryComparisonStatus } from '@/domain/directory-comparison/entry-comparison-result';
 import {
@@ -16,6 +19,32 @@ import {
 
 function childPath(currentPath: string, name: string): string {
   return currentPath === '/' ? `/${name}` : `${currentPath}/${name}`;
+}
+
+function isWithinSubtree(path: string, root: string): boolean {
+  return path === root || path.startsWith(root === '/' ? '/' : root + '/');
+}
+
+function toRelative(path: string, root: string): string {
+  if (path === root) return '.';
+  return root === '/' ? path.slice(1) : path.slice(root.length + 1);
+}
+
+/** The active path for `side`, relative to that pane's own current
+ * directory (`paneRootPath`) — `null` if nothing's active, or the active
+ * unit isn't within this pane's currently-shown subtree at all (e.g. a
+ * queued comparison for a different pair, or Move sync has the two panes
+ * looking at unrelated trees). */
+function activePathForSide(
+  activePath: ComparisonView['activePath'],
+  side: 'left' | 'right',
+  paneRootPath: string,
+): string | null {
+  if (!activePath) return null;
+  const candidate =
+    activePath.pass === 'structural' ? activePath.path : activePath[side];
+  if (!isWithinSubtree(candidate, paneRootPath)) return null;
+  return toRelative(candidate, paneRootPath);
 }
 
 /**
@@ -46,8 +75,22 @@ export function DirectoryComparisonExplorer() {
     savePanes(state);
   }, [leftPath, rightPath, moveSync, hydrated]);
 
-  const { view, starting, compare, stop } = useComparisonStatus(
+  const { view, starting, compare, stop, refetch } = useComparisonStatus(
     leftPath,
+    rightPath,
+  );
+
+  const [leftRefreshToken, setLeftRefreshToken] = useState(0);
+  const [rightRefreshToken, setRightRefreshToken] = useState(0);
+
+  const leftActivePath = activePathForSide(
+    view?.activePath ?? null,
+    'left',
+    leftPath,
+  );
+  const rightActivePath = activePathForSide(
+    view?.activePath ?? null,
+    'right',
     rightPath,
   );
 
@@ -70,6 +113,42 @@ export function DirectoryComparisonExplorer() {
     }
   };
 
+  const copyToOtherSide = async (fromSide: 'left' | 'right', name: string) => {
+    const sourceParent = fromSide === 'left' ? leftPath : rightPath;
+    const destinationParent = fromSide === 'left' ? rightPath : leftPath;
+    const sourcePath = childPath(sourceParent, name);
+    const destinationPath = childPath(destinationParent, name);
+
+    if (
+      !window.confirm(
+        `Copy "${sourcePath}" to "${destinationPath}"?\n\nThis creates a new copy — nothing on either side is deleted, moved, or overwritten.`,
+      )
+    ) {
+      return;
+    }
+
+    const res = await fetch('/api/directory-comparison/copy', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sourcePath, destinationPath }),
+    });
+
+    if (!res.ok) {
+      const body = (await res.json().catch(() => null)) as {
+        error?: string;
+      } | null;
+      window.alert(`Copy failed: ${body?.error ?? res.statusText}`);
+      return;
+    }
+
+    if (fromSide === 'left') setRightRefreshToken((t) => t + 1);
+    else setLeftRefreshToken((t) => t + 1);
+    // Without this, the entry keeps showing its stale only_left/only_right
+    // status (and the Copy button) until the next poll tick — which may
+    // never come if no pass is currently active (isActive gates polling).
+    await refetch();
+  };
+
   const navigateUp = (pane: 'left' | 'right') => {
     if (pane === 'left') {
       const parent = getParentPath(leftPath);
@@ -89,7 +168,13 @@ export function DirectoryComparisonExplorer() {
   };
 
   return (
-    <div className="flex flex-1 flex-col">
+    // h-full (not flex-1 — the dashboard shell's <main> isn't a flex
+    // container, so flex-1 alone does nothing here) makes this fill the
+    // shell's real height regardless of content length, so the two-pane
+    // grid below always stretches to the bottom — otherwise, with few
+    // entries, the grid (and its divide-x border) only grows as tall as its
+    // own content and stops partway down the page.
+    <div className="flex h-full flex-col">
       <div className="sticky top-0 z-10 flex flex-wrap items-center justify-between gap-3 border-b bg-background p-4">
         <label className="flex items-center gap-2 text-sm">
           <input
@@ -107,8 +192,8 @@ export function DirectoryComparisonExplorer() {
           onStop={() => void stop()}
         />
       </div>
-      <div className="grid flex-1 grid-cols-2 divide-x">
-        <div className="flex flex-col">
+      <div className="grid flex-1 grid-cols-2 divide-x overflow-hidden">
+        <div className="flex flex-col overflow-hidden">
           <div className="flex items-center gap-3 border-b p-2">
             <Button
               variant="outline"
@@ -124,13 +209,29 @@ export function DirectoryComparisonExplorer() {
               {leftPath}
             </p>
           </div>
-          <ComparisonPane
-            path={leftPath}
-            onNavigate={(name) => navigateInto('left', name)}
-            statusByName={leftStatusByName}
-          />
+          <div className="flex-1 overflow-y-auto">
+            <ComparisonPane
+              path={leftPath}
+              side="left"
+              onNavigate={(name) => navigateInto('left', name)}
+              statusByName={leftStatusByName}
+              refreshToken={leftRefreshToken}
+              onCopyToOtherSide={(name) => copyToOtherSide('left', name)}
+            />
+          </div>
+          {/* Pinned below the scrollable listing (not sticky inside it) —
+              stays visible regardless of scroll position without needing
+              position: sticky. */}
+          {leftActivePath && (
+            <p
+              className="truncate border-t bg-background px-2 py-1.5 font-mono text-xs text-blue-500"
+              title={leftActivePath}
+            >
+              {leftActivePath}
+            </p>
+          )}
         </div>
-        <div className="flex flex-col">
+        <div className="flex flex-col overflow-hidden">
           <div className="flex items-center gap-3 border-b p-2">
             <Button
               variant="outline"
@@ -146,11 +247,24 @@ export function DirectoryComparisonExplorer() {
               {rightPath}
             </p>
           </div>
-          <ComparisonPane
-            path={rightPath}
-            onNavigate={(name) => navigateInto('right', name)}
-            statusByName={rightStatusByName}
-          />
+          <div className="flex-1 overflow-y-auto">
+            <ComparisonPane
+              path={rightPath}
+              side="right"
+              onNavigate={(name) => navigateInto('right', name)}
+              statusByName={rightStatusByName}
+              refreshToken={rightRefreshToken}
+              onCopyToOtherSide={(name) => copyToOtherSide('right', name)}
+            />
+          </div>
+          {rightActivePath && (
+            <p
+              className="truncate border-t bg-background px-2 py-1.5 font-mono text-xs text-blue-500"
+              title={rightActivePath}
+            >
+              {rightActivePath}
+            </p>
+          )}
         </div>
       </div>
     </div>

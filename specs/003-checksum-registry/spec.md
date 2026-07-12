@@ -314,6 +314,12 @@ every other entry shows "Matching".
   requiring the user to press "Compare" again at that level.
 - **FR-017**: The tool MUST be reachable as its own section from the dashboard
   shell's navigation, distinct from the Count and Size tool.
+- **FR-018** (added post-implementation, user request): For an entry whose
+  status is "Only on this side," the system MUST offer an action to copy that
+  entry (recursively, if a directory) to the corresponding location on the other
+  side. This action MUST require explicit user confirmation before running, and
+  MUST refuse to run — rather than overwrite, merge, or delete anything — if the
+  destination path already exists by the time the copy would start.
 
 ### Key Entities
 
@@ -381,9 +387,14 @@ every other entry shows "Matching".
 - A global duplicate registry/search across the whole filesystem, and any file
   deletion action, are out of scope for this spec — deferred to a later feature
   that can build on this tool's checksum-computation infrastructure.
-- This tool is read-only: it never deletes, moves, or modifies files, so the
-  project's dry-run/confirmation requirement for destructive operations does not
-  apply to it.
+- This tool's scanning/comparison machinery is entirely read-only: it never
+  deletes, moves, or modifies files, so the project's dry-run/confirmation
+  requirement for destructive operations does not apply to it. The one exception
+  (FR-018, added post-implementation) is the "copy to the other side" action for
+  "Only on this side" entries — a narrow, additive-only write capability (never
+  overwrites, moves, merges, or deletes) that still requires explicit user
+  confirmation per the project's safety principle, even though it isn't strictly
+  a "destructive" operation as that principle defines the term.
 - Hard links are treated as ordinary files, consistent with Count and Size's
   precedent — detecting and special-casing shared inodes is out of scope.
 - There is no comparison history feature: the tool doesn't remember or list

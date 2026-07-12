@@ -53,20 +53,6 @@ export function ComparisonStatusPanel({
           {view.passActive ? PASS_LABELS[view.passActive] : 'Idle'}
         </span>
       )}
-      {view?.activePath && (
-        <span
-          className="max-w-full truncate font-mono text-xs text-muted-foreground"
-          title={
-            view.activePath.pass === 'structural'
-              ? view.activePath.path
-              : `${view.activePath.left} ↔ ${view.activePath.right}`
-          }
-        >
-          {view.activePath.pass === 'structural'
-            ? view.activePath.path
-            : `${view.activePath.left} ↔ ${view.activePath.right}`}
-        </span>
-      )}
     </div>
   );
 }

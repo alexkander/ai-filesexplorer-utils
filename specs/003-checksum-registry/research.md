@@ -157,6 +157,15 @@ intact. `get-comparison-view.ts` uses this for an exact-path match on file
 entries (not a subtree-containment check like it uses for directories), so only
 the one file genuinely being hashed shows `scanning`.
 
+**Addendum — per-pane, relative active-path display (added
+post-implementation)**: `GET /status`'s `activePath` was initially rendered as
+one combined line (`comparison-status-panel.tsx`, absolute `left ↔ right` paths)
+in the shared top toolbar. Moved into each pane's own header instead —
+`left`/`right` each show their own active path, computed relative to that pane's
+own currently-displayed directory (`directory-comparison-explorer.tsx`'s
+`activePathForSide`), not the tool-wide absolute path. The API response shape is
+unchanged; only which component renders it, and how, moved.
+
 ## Decision 4: `ChecksumPort` — streamed SHA-256, one algorithm for both stages
 
 **Decision**: A new port, `application/directory-comparison/checksum-port.ts`:
@@ -426,3 +435,47 @@ implementation.
 implementation with the extra fields (rejected — duplicates ~20 lines of
 `fs.readdir`/`stat` logic for two small additive fields, the exact Constitution
 Principle I violation Decision 6 already rejected once).
+
+## Decision 14: `CopyPort` — a narrow, additive-only write action (added post-implementation)
+
+**Decision**: For an "Only on this side" entry (spec FR-018, user request), a
+Copy button (`comparison-pane.tsx`) offers to copy it — recursively, if a
+directory — to the corresponding path on the other side. A new port,
+`application/directory-comparison/copy-port.ts`
+(`copy(sourcePath, destinationPath): Promise<CopyOutcome>`), kept entirely
+separate from `FileSystemPort` (read-only, shared with Count and Size) and
+`ChecksumPort` (content hashing) — interface segregation, since this is a
+different capability (writing) with a different risk profile. Implemented by
+`infrastructure/directory-comparison/copy-adapter.ts` via `fs.promises.cp` (Node
+built-in, no new dependency),
+`{ recursive: true, errorOnExist: true, force: false }` — refuses to overwrite
+anything, backed up by an explicit pre-check that the destination doesn't
+already exist. The UI (`directory-comparison-explorer.tsx`) requires a
+`window.confirm()` before ever calling `POST /api/directory-comparison/copy`,
+and bumps the destination pane's own refresh token afterward so the new entry
+shows up without a full page reload.
+
+**Rationale**: This is the first (and, per spec FR-018's scope, only)
+filesystem-writing action in this tool — everything else (Pass 1, Pass 2,
+`GET /list`, `GET /status`) is strictly read-only. Constitution Principle V
+("Safe-by-Default Destructive Operations") literally covers "deletes, moves,
+overwrites, or merges" — a copy that refuses to run if the destination exists
+does none of those, so it isn't strictly in scope. The confirmation prompt is
+still included anyway, matching the principle's spirit: this writes to the
+user's real files, and a wrong click (wrong entry, wrong direction) is exactly
+the kind of mistake a confirmation step catches cheaply. No separate dry-run
+preview screen was built — for a single named entry (not a bulk merge), the
+confirm dialog's message (`source path → destination path`) already states the
+entire scope of what will happen, so a dedicated preview UI would be pure
+ceremony for no added clarity (Constitution Principle I).
+
+**Alternatives considered**: Allowing the copy to overwrite an existing
+destination (rejected — destination existing at all breaks the "Only on this
+side" premise the button is offered under: if the compare's live-filesystem
+listing said the name doesn't exist on the other side, but the actual copy
+attempt finds it does, something changed concurrently, and silently overwriting
+would be a real overwrite of a Principle-V-protected kind). Reusing
+`FileSystemPort` for this by adding a `copy` method to it (rejected —
+`FileSystemPort` is shared with Count and Size, which has no use for a write
+capability at all; adding it there would violate interface segregation,
+Constitution Principle III, for the sake of avoiding one small new port).

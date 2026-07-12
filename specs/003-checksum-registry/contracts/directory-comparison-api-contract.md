@@ -95,6 +95,33 @@ already-computed results are kept.
 **Response `200`**: `{ "stopped": true }` if anything was in progress and is now
 stopped; `{ "stopped": false }` otherwise.
 
+## `POST /api/directory-comparison/copy`
+
+Added post-implementation (spec FR-018, user request) — the one
+filesystem-writing route in this otherwise read-only tool.
+
+Body:
+`{ "sourcePath": "/a/only-here.txt", "destinationPath": "/b/only-here.txt" }`.
+Copies `sourcePath` to `destinationPath`, recursively if it's a directory
+(`contracts/copy-port-contract.md`). The UI only ever calls this for an entry
+whose current status is "Only on this side" and only after the user explicitly
+confirms — the route itself doesn't know or care about comparison status, it
+just refuses to overwrite.
+
+**Response `200`**: `{ "ok": true }`.
+
+**Response `404`**: `{ "error": "source_not_found" }` — `sourcePath` doesn't
+exist.
+
+**Response `409`**: `{ "error": "destination_exists" }` — `destinationPath`
+already exists; nothing was touched.
+
+**Response `500`**: `{ "error": "unreadable" }` — the copy failed partway
+(permission error, disk full, etc.); already-copied files from a partial
+directory copy are left in place (`fs.cp` gives no atomicity guarantee across a
+whole tree), so a manual cleanup pass under `destinationPath` is the caller's
+responsibility if this happens.
+
 ## Rules a consumer can rely on
 
 - `POST /compare` and `POST /stop` never block on either pass completing — both
