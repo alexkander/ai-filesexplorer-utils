@@ -53,6 +53,12 @@ interface ComparisonRepositoryPort {
     checksums: { partialChecksum?: string; fullChecksum?: string },
   ): void;
   recordDirectoryChecksum(path: string, checksum: string | null): void; // null clears a stale value (e.g. a child changed)
+
+  // Pass 2 only. Sets hasUnreadableEntries = true for a directory whose
+  // content (its own file, or a descendant's) failed to read during
+  // checksumming — WITHOUT touching ownOutcome, which stays Pass-1-owned
+  // (research.md Decision 3; found missing during /speckit-analyze review).
+  recordContentReadFailure(path: string): void;
 }
 ```
 
@@ -62,7 +68,9 @@ interface ComparisonRepositoryPort {
   `recordDirectoryOwnResult`, `upsertFileFacts` for each direct file.
 - `compare-subtree.ts` (Pass 2): `getDirectChildren` at each level (bottom-up),
   `recordChecksums` as the cascade computes partial/full checksums,
-  `recordDirectoryChecksum` once a directory pair resolves.
+  `recordDirectoryChecksum` once a directory pair resolves,
+  `recordContentReadFailure` when `ChecksumPort` throws for a file that was
+  listed successfully but couldn't actually be read (spec FR-011, FR-011a).
 - `get-comparison-view.ts`: `getDirectChildren` for the currently-viewed pair's
   direct entries, feeding
   `domain/directory-comparison/entry-comparison-result.ts`.

@@ -46,15 +46,27 @@ file (`size`/`modification_time` known from listing;
 `partial_checksum`/`full_checksum` left `null` — no hashing here),
 `upsertPending`s each subdirectory, and records the directory's own
 `done`/`error` outcome. `start-comparison.ts` calls `enqueue()` on this one
-engine instance for **both** the left and right root paths — since the engine is
-already a single-active-operation LIFO singleton, this alone satisfies FR-010
-("only one active comparison scan within this tool") with no new coordination
-code; the two subtrees interleave arbitrarily on the same stack, which is fine
-because Pass 1 does no cross-side comparison.
+engine instance for **both** the left and right root paths, always with
+`mode: 'full'` — Pass 1 always re-lists everything in scope on every "Compare,"
+regardless of the incremental/full choice the user made (see Decision 11 for
+why: unlike Count and Size, this feature cannot skip re-listing a subdirectory
+just because it succeeded before, since doing so would prevent ever detecting a
+later file change). Enqueuing both roots on this one engine instance still
+satisfies FR-010 ("only one active comparison scan within this tool") with no
+new coordination code; the two subtrees interleave arbitrarily on the same
+stack, which is fine because Pass 1 does no cross-side comparison. When
+`leftPath === rightPath` (comparing a directory against itself, spec Edge
+Cases), the same path is enqueued twice in the same run;
+`upsertPendingDirectory`/`upsertFileFacts` are ordinary SQL upserts keyed by
+`path`, so the second write simply overwrites the first with equivalent data —
+safe, no duplicate-key error, no special-casing needed.
 
 **Rationale**: This is exactly what the scan-engine extraction (PR #6) was built
 for — a second feature supplying its own per-node step without duplicating
-traversal/stop/resume/incremental-doneSet machinery.
+traversal/stop/resume machinery. Pass 1 deliberately does **not** reuse
+`ScanEngine`'s incremental (`doneSet`-based) skip-relisting capability the way
+Count and Size does — see Decision 11 for why that specific optimization is
+wrong for this feature.
 
 **Alternatives considered**: Two separate `ScanEngine` instances, one per side
 (rejected — would need extra coordination to enforce "one active operation"
@@ -273,20 +285,56 @@ Count and Size — spec FR-001 explicitly inherits FR-001a), returning
 **Rationale**: Consistency with the tool the spec explicitly ties this one's
 browsing UX to; no reason to pick different constants.
 
-## Decision 11: Incremental vs. full applies across both passes
+## Decision 11: Incremental vs. full — Pass 1 always relists; the skip lives entirely in Pass 2
 
-**Decision**: `mode: 'incremental'` (default) skips, in Pass 1, any subdirectory
-whose last listing already completed and is unaffected by any change beneath it
-(reusing `deriveDoneSet` exactly as Count and Size does, computed independently
-per side), and skips, in Pass 2, any directory pair already known `Matching`
-whose `directory_checksum` is still valid (i.e. every entry beneath it is still
-unchanged per Pass 1's fresh size/modification-time data — if Pass 1 found
-nothing changed anywhere in that pair's subtree, Pass 2 doesn't need to re-walk
-it at all). `mode: 'full'` (the "Force full re-compare" action, spec FR-009 —
-always both sides together) clears cached checksums for both subtrees and forces
-both passes to redo everything.
+**Decision (revised)**: Pass 1 does **not** implement an incremental mode at all
+— it always fully re-lists every directory in the requested subtree on every
+"Compare" (`upsertFileFacts` for every direct file, refreshing
+`size`/`modificationTime`; `recordDirectoryOwnResult` for every directory),
+regardless of whether the user chose the default "Compare" or "Force full
+re-compare." This is cheap (`readdir`+`stat` only, no content read) and is
+required to detect on-disk changes at all — `FR-008` requires skipping a file's
+checksum recomputation only when its size/mtime are _unchanged since last
+computed_, and skipping a subdirectory only when it _"remains unaffected by any
+change beneath it"_; both phrases require freshly re-checking disk state on
+every "Compare," not trusting that a prior successful listing is still accurate.
 
-**Rationale**: Directly implements FR-006/FR-008/FR-009. Reusing `deriveDoneSet`
-for Pass 1 needs no new domain code; Pass 2's own skip check is a simple
-validity comparison against Pass 1's just-refreshed size/mtime facts, not a
-separate cache-invalidation mechanism.
+`mode: 'incremental'` (default, spec FR-008) vs. `mode: 'full'` (the "Force full
+re-compare" action, spec FR-009 — always both sides together) only changes
+**Pass 2's** behavior, after Pass 1's fresh listing:
+
+- `'incremental'`: for each directory pair, walking bottom-up, Pass 2 treats a
+  cached `directory_checksum` as still valid — and skips re-deriving it —
+  **iff**, for every direct entry: a file's `checksummedAt` is not older than
+  its (just-refreshed by Pass 1) `modificationTime`, and a subdirectory's own
+  `directory_checksum` is itself still valid by this same check (recursively)
+  and non-`null`. If valid on both sides and equal, the pair is `Matching`
+  without recomputing anything. The first invalid or missing entry at any level
+  ends the shortcut for that pair — the ordinary cascade (Decision 3) then runs
+  for whatever wasn't already confirmed valid, exactly the entries actually
+  affected by a change, not the whole subtree.
+- `'full'`: clears `partialChecksum`/`fullChecksum` on every `file_checksums`
+  row and `directoryChecksum` on every `directory_comparison_nodes` row in both
+  subtrees before Pass 2 runs, forcing the cascade to redo everything.
+
+**Rationale**: Directly implements FR-006/FR-008/FR-009 — and specifically
+avoids a bug the original version of this decision had: reusing `ScanEngine`'s
+`doneSet`-based skip-relisting (as Count and Size's own "Scan" does) would mean
+a directory, once successfully listed, is **never re-listed again** on a later
+"Compare" — Count and Size's own spec explicitly accepts this as a known
+limitation for its use case ("a subdirectory that stays
+Completed-and-not-incomplete is never revisited even if its on-disk contents
+change later"). That's fine for Count and Size, whose numbers don't need to
+detect content changes — but it directly breaks this feature's core promise:
+FR-008 and the whole point of "Compare" require noticing when a file changed.
+Keeping Pass 1 unconditional and moving the actual skip logic into Pass 2 (which
+already has to inspect every level's data to build `EntryComparisonResult`s)
+achieves the same "no redundant work" goal (SC-005) without that gap.
+
+**Alternatives considered**: Reusing `deriveDoneSet` for Pass 1 as originally
+planned (rejected — see Rationale; found during `/speckit-analyze` review as a
+correctness bug, not merely a style choice). Making Pass 1 itself decide what's
+"changed" and only tell Pass 2 about affected paths (rejected — would duplicate
+the validity check Pass 2 already needs to do bottom-up for its own cascade;
+simpler to let Pass 2 read Pass 1's always-fresh facts directly than to invent a
+separate change-notification channel between the two passes).

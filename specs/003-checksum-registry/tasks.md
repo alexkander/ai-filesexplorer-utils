@@ -203,9 +203,11 @@ Compare. The differing file ends up `Differs`, the lone file
       (Depends on T002.)
 - [ ] T019 [US3] Create
       `application/directory-comparison/comparison-repository-port.ts`: the
-      `ComparisonRepositoryPort` interface
-      (contracts/comparison-repository-port-contract.md). (Depends on T013,
-      T014.)
+      `ComparisonRepositoryPort` interface, including
+      `recordContentReadFailure(path)` — a Pass-2-only method that sets
+      `hasUnreadableEntries` without touching `ownOutcome`, which stays
+      Pass-1-owned (contracts/comparison-repository-port-contract.md; found
+      missing during `/speckit-analyze` review). (Depends on T013, T014.)
 
 ### Infrastructure adapters
 
@@ -233,44 +235,62 @@ Compare. The differing file ends up `Differs`, the lone file
       `upsertFileFacts` for each direct file (size/mtime only, no hashing),
       `upsertPendingDirectory` for each subdirectory, and
       `recordDirectoryOwnResult` for this directory (research.md Decision 2).
-      (Depends on T001, T022.)
+      Always relists unconditionally — this step does not consult or apply any
+      `doneSet`-style skip; the incremental/full distinction is entirely Pass
+      2's concern (research.md Decision 11, revised after `/speckit-analyze`
+      found the original doneSet-reuse plan would have prevented ever detecting
+      a changed file). (Depends on T001, T022.)
 - [ ] T024 [US3] Create
       `infrastructure/directory-comparison/structural-scan-worker.ts`: a
       singleton instantiating the shared
       `infrastructure/scanning/scan-engine.ts`'s `ScanEngine` with
       `comparison-repository-adapter.ts` and `list-entries.ts` as its per-node
-      step (research.md Decision 2). (Depends on T023.)
+      step (research.md Decision 2). Always enqueues both roots with
+      `mode: 'full'` regardless of the user's incremental/full choice for the
+      overall "Compare" — Pass 1 has no incremental mode of its own (research.md
+      Decision 11). (Depends on T023.)
 
 ### Pass 2 — bottom-up cascading comparison
 
 - [ ] T025 [US3] Create `application/directory-comparison/compare-subtree.ts`:
       Pass 2 — walks the two already-listed subtrees bottom-up
-      (depth-descending, same technique as `deriveDoneSet`), pairing direct
-      entries by name (`entry-comparison-result.ts`), applying
+      (depth-descending, using the same depth-sorting technique as
+      `deriveDoneSet`, but its own logic — this is not a call into
+      `deriveDoneSet` itself, which is Pass-1-shaped and not reused here),
+      pairing direct entries by name (`entry-comparison-result.ts`). In
+      `mode: 'incremental'`, first checks whether a directory pair's cached
+      `directoryChecksum` is still valid per research.md Decision 11 (every
+      direct file's `checksummedAt` not older than its just-refreshed
+      `modificationTime`; every subdirectory recursively valid and non-null)
+      and, if so, treats it as `matching` without recomputing; otherwise applies
       `checksum-cascade.ts` per file pair (calling `ChecksumPort` only as the
-      cascade requires), recursing into directory pairs, and calling
-      `derive-directory-checksum.ts` + persisting via `recordDirectoryChecksum`
+      cascade requires), recurses into directory pairs, and calls
+      `derive-directory-checksum.ts` + persists via `recordDirectoryChecksum`
       only once a directory pair fully resolves `matching` (research.md Decision
-      3). Sets `hasUnreadableEntries`/error status and propagates it to
-      ancestors when a file's content can't be read (spec FR-011, FR-011a).
-      (Depends on T015, T016, T017, T018, T020, T022.)
+      3). Calls the new `recordContentReadFailure(path)` (not
+      `recordDirectoryOwnResult`, which stays Pass-1-owned) when `ChecksumPort`
+      throws for a file, and propagates the resulting Error status to ancestors
+      (spec FR-011, FR-011a). (Depends on T015, T016, T017, T018, T019, T020,
+      T022.)
 - [ ] T026 [US3] Create
       `infrastructure/directory-comparison/comparison-pass-worker.ts`: a
       lightweight singleton running `compare-subtree.ts` over a given
-      `{ leftRoot, rightRoot }`, tracking `activePair`/`activePath` (for
-      `/status` to report live progress) and a cancellation flag checked between
-      each directory pair (research.md Decision 5; spec FR-013). (Depends on
-      T025.)
+      `{ leftRoot, rightRoot, mode: 'incremental' | 'full' }` — this is where
+      the user's incremental/full choice actually applies (research.md
+      Decision 11) — tracking `activePair`/`activePath` (for `/status` to report
+      live progress) and a cancellation flag checked between each directory pair
+      (research.md Decision 5; spec FR-013). (Depends on T025.)
 
 ### Orchestration and read-side
 
 - [ ] T027 [US3] Create `application/directory-comparison/start-comparison.ts`:
-      enqueues both roots on `structural-scan-worker.ts` (Pass 1;
-      `mode: 'incremental' |     'full'`, reusing `deriveDoneSet` per side —
-      spec FR-006, FR-008), then starts `comparison-pass-worker.ts` (Pass 2)
-      once Pass 1 settles for both roots. `mode: 'full'` (the "Force full
-      re-compare" action, spec FR-009) always covers both sides together and
-      clears cached checksums first. (Depends on T024, T026.)
+      enqueues both roots on `structural-scan-worker.ts` (Pass 1 — always
+      relists unconditionally, no `mode` of its own; research.md Decision 11),
+      then starts `comparison-pass-worker.ts` (Pass 2) with the user's
+      `mode: 'incremental' | 'full'` once Pass 1 settles for both roots (spec
+      FR-006, FR-008). `mode: 'full'` (the "Force full re-compare" action, spec
+      FR-009) always covers both sides together and clears cached checksums
+      before Pass 2 runs. (Depends on T024, T026.)
 - [ ] T028 [US3] Create `application/directory-comparison/stop-comparison.ts`:
       cancels whichever pass (structural or comparison) is currently active for
       a given pair's roots (spec FR-013). (Depends on T024, T026.)
