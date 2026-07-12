@@ -142,29 +142,35 @@ specs/002-count-and-size/
 
 ```text
 domain/
-└── count-and-size/
-    ├── directory-scan-node.ts       # DirectoryScanNode, OwnOutcome types
-    ├── derive-directory-view.ts     # Pure: (node, descendantNodes) -> DirectoryView
-    ├── derive-done-set.ts           # Pure: (subtreeNodes) -> Set<path> of fully-done paths (Decision 10)
+├── count-and-size/
+│   ├── directory-scan-node.ts       # DirectoryScanNode (extends scanning's ScanNodeStatus) + count/size fields
+│   └── derive-directory-view.ts     # Pure: (node, descendantNodes) -> DirectoryView
+└── scanning/                        # Feature-agnostic tree-walk primitives, shared with future scan-based tools
+    ├── scan-node-status.ts          # OwnOutcome, ScanNodeStatus — generic lifecycle shape
+    ├── derive-done-set.ts           # Pure: (subtreeNodeStatuses) -> Set<path> of fully-done paths (Decision 10)
     ├── should-ignore-entry.ts       # Pure: (RawEntry) -> ignore? + reason (symlink/unreadable)
+    ├── path-info.ts                 # Pure: getDepth/getParentPath
     └── scan-stack.ts                # Pure LIFO stack push/pop/contains; entries are { path, mode, doneSet? }
 
 application/
-└── count-and-size/
+├── count-and-size/
+│   ├── scan-repository-port.ts      # ScanRepositoryPort interface (count/size-specific)
+│   ├── list-directory.ts            # Use case: paginated listing + hasScanData
+│   ├── get-directory-status.ts      # Use case: DirectoryView for one path
+│   ├── start-scan.ts                # Use case: enqueue a path; mode: 'incremental' | 'full' (Decision 10)
+│   ├── stop-scan.ts                 # Use case: stop the active scan
+│   └── process-directory.ts         # Per-node step: traverseDirectory + count/size accumulation + persistence
+└── scanning/
     ├── filesystem-port.ts           # FileSystemPort interface
-    ├── scan-repository-port.ts      # ScanRepositoryPort interface
-    ├── list-directory.ts            # Use case: paginated listing + hasScanData
-    ├── get-directory-status.ts      # Use case: DirectoryView for one path
-    ├── start-scan.ts                # Use case: enqueue a path; mode: 'incremental' | 'full' (Decision 10)
-    ├── stop-scan.ts                 # Use case: stop the active scan
-    └── process-directory.ts         # Use case: the worker's per-node step; consults doneSet when mode is incremental
+    ├── scan-scheduler-port.ts       # ScanSchedulerPort interface
+    └── traverse-directory.ts        # Generic per-node listing/filtering/doneSet-skip, no persistence
 
 infrastructure/
 ├── count-and-size/
 │   ├── filesystem-adapter.ts        # Implements FileSystemPort (fs/promises)
 │   ├── sqlite-client.ts             # Opens data/count-and-size.sqlite, creates schema
 │   ├── scan-repository-adapter.ts   # Implements ScanRepositoryPort (better-sqlite3)
-│   ├── scan-worker.ts               # Singleton: in-memory stack + loop + startup reconciliation
+│   ├── scan-worker.ts               # Singleton: instantiates the shared ScanEngine with count-and-size's adapters
 │   ├── last-path-storage.ts         # localStorage read/write for the remembered path (research.md Decision 5)
 │   └── ui/
 │       ├── count-and-size-explorer.tsx  # Owns currentPath client state; Up button; wires the two below
@@ -173,6 +179,8 @@ infrastructure/
 │       ├── format-size.ts           # Shared humanized + exact-byte size formatting (spec FR-005b)
 │       ├── state-labels.ts          # Shared DirectoryState -> display label map
 │       └── components/              # Additional shadcn/ui primitives if needed (e.g. badge, progress)
+├── scanning/
+│   └── scan-engine.ts               # Feature-agnostic engine: in-memory stack + loop + startup reconciliation
 └── ui/                              # (existing) sidebar/header, unchanged except new MenuEntry
 
 app/

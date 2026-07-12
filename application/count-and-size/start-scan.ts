@@ -1,8 +1,8 @@
 import type { ScanRepositoryPort } from './scan-repository-port';
-import type { ScanSchedulerPort } from './scan-scheduler-port';
-import { getParentPath, getDepth } from '@/domain/count-and-size/path-info';
-import { deriveDoneSet } from '@/domain/count-and-size/derive-done-set';
-import type { ScanMode } from '@/domain/count-and-size/scan-stack';
+import type { ScanSchedulerPort } from '@/application/scanning/scan-scheduler-port';
+import { getParentPath, getDepth } from '@/domain/scanning/path-info';
+import { deriveDoneSet } from '@/domain/scanning/derive-done-set';
+import type { ScanMode } from '@/domain/scanning/scan-stack';
 
 /**
  * Starts a scan rooted at `path` (spec FR-006). `mode: 'incremental'`

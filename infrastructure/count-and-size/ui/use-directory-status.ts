@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import type { DirectoryView } from '@/domain/count-and-size/derive-directory-view';
-import type { ScanMode } from '@/domain/count-and-size/scan-stack';
+import type { ScanMode } from '@/domain/scanning/scan-stack';
 
 const POLL_INTERVAL_MS = 2000;
 

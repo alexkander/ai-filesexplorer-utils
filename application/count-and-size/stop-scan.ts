@@ -1,5 +1,5 @@
 import type { ScanRepositoryPort } from './scan-repository-port';
-import type { ScanSchedulerPort } from './scan-scheduler-port';
+import type { ScanSchedulerPort } from '@/application/scanning/scan-scheduler-port';
 
 /**
  * Stops the scan rooted at `path` — every node in its subtree that hasn't

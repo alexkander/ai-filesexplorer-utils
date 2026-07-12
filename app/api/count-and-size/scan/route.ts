@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { startScan } from '@/application/count-and-size/start-scan';
 import { scanRepositoryAdapter } from '@/infrastructure/count-and-size/scan-repository-adapter';
 import { scanWorker } from '@/infrastructure/count-and-size/scan-worker';
-import type { ScanMode } from '@/domain/count-and-size/scan-stack';
+import type { ScanMode } from '@/domain/scanning/scan-stack';
 
 export async function POST(request: NextRequest) {
   const body = (await request.json()) as { path?: string; mode?: string };

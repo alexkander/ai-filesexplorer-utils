@@ -4,7 +4,7 @@ import type {
   FileSystemPort,
   ListChildrenOutcome,
   RawEntry,
-} from '@/application/count-and-size/filesystem-port';
+} from '@/application/scanning/filesystem-port';
 
 function isUnreadableError(error: unknown): boolean {
   const code = (error as NodeJS.ErrnoException)?.code;
