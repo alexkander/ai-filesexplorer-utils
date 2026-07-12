@@ -1,4 +1,4 @@
-import type { DirectoryScanNode } from './directory-scan-node';
+import type { ScanNodeStatus } from './scan-node-status';
 
 /**
  * Given one `getSubtree(root)` result, returns the set of paths whose own
@@ -7,8 +7,8 @@ import type { DirectoryScanNode } from './directory-scan-node';
  * already-complete subdirectories during an incremental scan (spec FR-021;
  * research.md Decision 10). Pure — no I/O.
  */
-export function deriveDoneSet(nodes: DirectoryScanNode[]): Set<string> {
-  const childrenByParent = new Map<string, DirectoryScanNode[]>();
+export function deriveDoneSet(nodes: ScanNodeStatus[]): Set<string> {
+  const childrenByParent = new Map<string, ScanNodeStatus[]>();
   for (const node of nodes) {
     if (node.parentPath === null) continue;
     const siblings = childrenByParent.get(node.parentPath) ?? [];

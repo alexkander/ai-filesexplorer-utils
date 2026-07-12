@@ -1,4 +1,4 @@
-import type { EntryKind } from '@/domain/count-and-size/should-ignore-entry';
+import type { EntryKind } from '@/domain/scanning/should-ignore-entry';
 
 export interface RawEntry {
   name: string;

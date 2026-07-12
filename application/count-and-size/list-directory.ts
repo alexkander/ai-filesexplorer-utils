@@ -1,6 +1,6 @@
-import type { FileSystemPort, RawEntry } from './filesystem-port';
+import type { FileSystemPort, RawEntry } from '@/application/scanning/filesystem-port';
 import type { ScanRepositoryPort } from './scan-repository-port';
-import type { EntryKind } from '@/domain/count-and-size/should-ignore-entry';
+import type { EntryKind } from '@/domain/scanning/should-ignore-entry';
 import {
   deriveDirectoryView,
   type DirectoryView,

@@ -1,13 +1,8 @@
-export type OwnOutcome = 'pending' | 'error' | 'stopped' | 'done';
+import type { ScanNodeStatus } from '@/domain/scanning/scan-node-status';
 
-export interface DirectoryScanNode {
-  path: string;
-  parentPath: string | null;
-  depth: number;
-  ownOutcome: OwnOutcome;
+export interface DirectoryScanNode extends ScanNodeStatus {
   directFileCount: number;
   directFileSize: number;
-  hasUnreadableEntries: boolean;
   errorMessage: string | null;
   ownFinishedAt: string | null;
 }

@@ -6,7 +6,7 @@ import { Button } from '@/infrastructure/ui/components/button';
 import { DirectoryBrowser } from './directory-browser';
 import { ScanStatusPanel } from './scan-status-panel';
 import { useDirectoryStatus } from './use-directory-status';
-import { getParentPath } from '@/domain/count-and-size/path-info';
+import { getParentPath } from '@/domain/scanning/path-info';
 import {
   loadLastPath,
   saveLastPath,

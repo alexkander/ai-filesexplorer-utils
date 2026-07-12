@@ -1,4 +1,4 @@
-import type { ScanMode } from '@/domain/count-and-size/scan-stack';
+import type { ScanMode } from '@/domain/scanning/scan-stack';
 
 /**
  * Lets application-layer use cases trigger/stop the background scan worker
