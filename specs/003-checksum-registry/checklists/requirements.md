@@ -1,4 +1,4 @@
-# Specification Quality Checklist: Checksum Registry and Duplicate Finder
+# Specification Quality Checklist: Directory Comparison Tool
 
 **Purpose**: Validate specification completeness and quality before proceeding
 to planning **Created**: 2026-07-12 **Feature**: [spec.md](../spec.md)
@@ -40,11 +40,24 @@ to planning **Created**: 2026-07-12 **Feature**: [spec.md](../spec.md)
   which documents the persistence choice at the same level of detail — kept out
   of the Functional Requirements themselves, which stay behavior-focused.
 - Post-review addition (2026-07-12): the initial draft didn't distinguish a file
-  failing to list/stat (FR-009) from one that lists fine but fails when its
-  content is actually read for hashing — a failure mode Count and Size never
-  has, since it only ever reads `size`, not content. Added FR-009a (an
-  incomplete directory has no computable checksum, propagated to ancestors) and
-  FR-009b (incomplete directories never match in the duplicate-directories view)
-  to prevent a checksum silently computed from a partial child set from causing
-  false-positive/false-negative duplicate matches.
+  failing to list/stat from one that lists fine but fails when its content is
+  actually read for hashing — a failure mode Count and Size never has, since it
+  only ever reads `size`, not content. Fixed by having an incomplete directory
+  show an Error status with no computable checksum, propagated to ancestors (now
+  FR-011/FR-011a), so a read failure can't produce a false-positive or
+  false-negative comparison result.
+- Scope revision (2026-07-12): replaced the cross-tree duplicate registry and
+  duplicate-finder views with a two-pane, side-by-side directory comparison tool
+  (TODO T001) — see the spec's Clarifications section. The checksum-computation
+  strategy (cascading file comparison, Merkle-style directory checksums,
+  incremental scanning) carries over unchanged; a global duplicate search and
+  any deletion action are deferred to a later spec, so Constitution Principle
+  V's dry-run/confirmation requirement no longer applies here (this tool is
+  read-only).
+- `/speckit-clarify` session (2026-07-12): asked 2 questions (Force full
+  re-compare scope: both sides together; Move sync persistence after a "not
+  found" mismatch: stays on) and self-resolved 2 more gaps directly by citing
+  unambiguous precedent in `specs/002-count-and-size/spec.md` (FR-001 now
+  inherits that tool's pagination behavior; FR-007 gained a "Not compared"
+  status mirroring its FR-004c). No regressions; all items still pass.
 - All checklist items pass; spec is ready for `/speckit-plan`.

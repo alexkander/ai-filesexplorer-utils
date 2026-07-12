@@ -1,4 +1,4 @@
-# Feature Specification: Checksum Registry and Duplicate Finder
+# Feature Specification: Directory Comparison Tool
 
 **Feature Branch**: `003-checksum-registry`
 
@@ -30,358 +30,369 @@ decide what to delete, with confirmation since it's destructive —
 scanning/indexing must never delete anything on its own. Out of scope: the
 separate 'compare two arbitrary directories' tool already tracked as TODO T001."
 
+## Clarifications
+
+### Session 2026-07-12 (revision)
+
+- Q: The original scope built a cross-tree checksum registry with duplicate-
+  finder views (find duplicate files anywhere in the indexed tree, delete them,
+  find duplicate directories anywhere) intended to search the whole filesystem
+  for matches. On reflection, is that still the right shape for this spec? → A:
+  No — replace it with a side-by-side, two-pane directory comparison tool (the
+  tool originally tracked separately as TODO T001): the user browses two
+  directories independently (or with synchronized navigation via a "Move sync"
+  toggle) and explicitly triggers a "Compare" action that computes and compares
+  checksums between the two currently selected directories and everything
+  beneath them. A global duplicate registry/search across the whole filesystem,
+  and any deletion action, are deferred to a later spec that can build on this
+  tool's checksum-computation infrastructure — they are no longer part of this
+  spec. User Stories, Functional Requirements, Key Entities, Success Criteria,
+  and Assumptions below are revised accordingly; the checksum computation
+  strategy itself (cascading file comparison, Merkle-style directory checksums,
+  incremental scanning) carries over unchanged from the original design.
+
+### Session 2026-07-12 (clarification)
+
+- Q: Does "Force full re-compare" apply to both panes together, or can each side
+  be force-recomputed independently? → A: Always both sides together, as a
+  single action — there is no per-side force-recompute. FR-009 is revised to
+  make this explicit.
+- Q: When Move sync is on and a synced navigation lands the mirrored pane in a
+  "not found" state (FR-002a), and the user then manually navigates that pane
+  elsewhere, does Move sync stay on for future moves, or turn off automatically?
+  → A: Stays on — it's explicit user-controlled state; a sync failure on one
+  move MUST NOT silently disable it. FR-002c is added to make this explicit.
+
+Two additional gaps were resolved directly (not asked, since existing precedent
+in `specs/002-count-and-size/spec.md` already settles them unambiguously) rather
+than spent as clarification questions:
+
+- FR-001 now explicitly inherits Count and Size's pagination/lazy-loading
+  behavior (its FR-001a) for either pane's listing, since FR-001 already ties
+  this tool's browsing UX to "the same way as the Count and Size tool" and large
+  directories can appear on either side.
+- FR-007 gained a sixth status, **Not compared**, for entries that have never
+  had a comparison run — mirroring Count and Size's FR-004c, which gives "not
+  scanned" its own distinct color rather than folding it into "Scanning."
+
 ## User Scenarios & Testing _(mandatory)_
 
-### User Story 1 - Build a checksum registry by indexing a directory (Priority: P1)
+### User Story 1 - Browse two directories side by side (Priority: P1)
 
-A user picks a directory (browsing the same way as the existing Count and Size
-tool) and starts an index. The tool computes a content checksum for every file
-in that directory's subtree and a derived checksum for every subdirectory, so
-that identical content can later be recognized regardless of where it lives.
+A user opens the tool and sees two independent directory browsers, left and
+right, each starting at the root ("/") — the same browsing experience as the
+Count and Size tool, duplicated into two independently navigable panes.
 
-**Why this priority**: Nothing else in this feature is possible without an index
-existing first. This is the foundation every other story is built on, and — like
-Count and Size — it must be resumable and non-blocking to be usable on a large
-personal file collection.
+**Why this priority**: This is the foundational UI every other story depends on.
+It delivers value on its own (a two-pane file browser) even before any
+comparison ever runs.
 
-**Independent Test**: From a directory that has never been indexed, press
-"Scan". Confirm indexing proceeds in the background, the user can keep browsing
-elsewhere while it runs, and once finished every file in the subtree has a
-recorded checksum and every directory has a recorded checksum derived from its
-contents.
+**Independent Test**: Open the tool. Confirm both panes show the root listing,
+and that navigating into a directory or back out on one side has no effect on
+the other side.
 
 **Acceptance Scenarios**:
 
-1. **Given** a directory has never been indexed, **When** the user presses
-   "Scan", **Then** an indexing procedure starts for that directory and
-   recursively for every subdirectory, computing a content checksum for each
-   direct file.
-2. **Given** an indexing procedure is running, **When** the user navigates to an
-   unrelated directory or leaves the tool, **Then** indexing continues in the
-   background and the rest of the application remains responsive.
-3. **Given** an indexing procedure completes for a directory, **When** the user
-   views that directory, **Then** it shows a checksum derived from its direct
-   entries' checksums and a last-indexed timestamp.
-4. **Given** a directory was already fully indexed and nothing under it changed
-   on disk, **When** the user presses "Scan" again, **Then** no file content is
-   re-read and no checksums are recomputed.
-5. **Given** a directory was already fully indexed and one file under it changed
-   (different size or modification time), **When** the user presses "Scan"
-   again, **Then** only that file's checksum is recomputed, and only the
-   directory checksums along the path from that file up to the indexed root are
-   recomputed — unrelated siblings and their subtrees are left untouched.
-6. **Given** the user wants to redo an index from scratch, **When** they use the
-   separate "Force full rescan" action, **Then** every file and directory
-   checksum in that subtree is recomputed, overwriting prior results.
-7. **Given** an indexing procedure is active, **When** the user presses Stop,
-   **Then** the running procedure and its already-spawned in-flight descendants
-   transition to a Stopped state without deleting or altering any file.
-8. **Given** a file was listed successfully but its content cannot be fully read
-   while computing its checksum (e.g. a permission change or I/O error after
-   listing), **When** indexing processes that file, **Then** the file is
-   skipped, its containing directory is flagged as having unreadable entries and
-   incomplete, and no directory checksum is computed for that directory or any
-   of its ancestors up to the indexed root.
+1. **Given** the user opens the tool, **When** it loads, **Then** both the left
+   and right panes show the contents of the root directory ("/").
+2. **Given** a pane's listing, **When** the user clicks a directory entry in
+   that pane, **Then** only that pane navigates into it.
+3. **Given** a pane's listing, **When** the user clicks a file entry, **Then**
+   nothing happens.
+4. **Given** either pane, **When** the user uses that pane's up/back navigation,
+   **Then** only that pane navigates to its own parent directory.
 
 ---
 
-### User Story 2 - Find duplicate files (Priority: P2)
+### User Story 2 - Keep both sides in sync while browsing (Priority: P2)
 
-A user opens a view listing every group of files that share identical content,
-discovered from the index, so they can see at a glance where the same file
-exists in multiple places.
+A "Move sync" toggle lets the user link the two panes' navigation together:
+while it's on, moving into a subdirectory (or up to the parent) on either side
+automatically applies the same relative move to the other side, so exploring two
+trees that are supposed to mirror each other doesn't require manually repeating
+every step on both panes.
 
-**Why this priority**: This is the direct payoff of indexing — the point where
-"I have a registry of checksums" becomes "I can see what's wasting space." It
-doesn't require the deletion action (Story 3) to already be valuable as a
-read-only report.
+**Why this priority**: This is what makes comparing two large, deep trees
+practical rather than tedious, but the tool is still usable without it (Story 1
+already allows manual side-by-side browsing).
 
-**Independent Test**: Index a directory containing at least one pair of files
-with identical content and one pair with identical size but different content.
-Open the duplicates view and confirm only the identical-content pair is listed
-as a duplicate group, each with its full path.
+**Independent Test**: Turn Move sync on. Navigate into a subdirectory on the
+left pane and confirm the right pane navigates into its own same-named
+subdirectory. Turn Move sync off and confirm navigating either pane no longer
+affects the other.
 
 **Acceptance Scenarios**:
 
-1. **Given** the registry contains two or more files with the same content
-   checksum, **When** the user opens the duplicates view, **Then** those files
-   are shown together as one duplicate group, each entry showing its full path
-   and size.
-2. **Given** the registry contains files that share the same size but not the
-   same content, **When** the user opens the duplicates view, **Then** those
-   files are not shown as a duplicate group.
-3. **Given** the indexed tree contains no duplicate files at all, **When** the
-   user opens the duplicates view, **Then** it clearly indicates that no
-   duplicates were found rather than showing an empty, unexplained list.
-4. **Given** a directory has not been indexed yet, **When** the user opens the
-   duplicates view, **Then** files under that directory are not considered (the
-   view only reflects what has been indexed).
+1. **Given** Move sync is on, **When** the user navigates into subdirectory "X"
+   on one pane, **Then** the other pane also navigates into its own "X" child of
+   whatever directory it currently shows.
+2. **Given** Move sync is on, **When** the user navigates up to the parent on
+   one pane, **Then** the other pane also navigates up to its own parent.
+3. **Given** Move sync is on and the corresponding entry doesn't exist on the
+   other side, **When** the synced navigation happens, **Then** that pane shows
+   a clear "not found" state instead of silently staying put or failing
+   destructively.
+4. **Given** Move sync is off, **When** the user navigates either pane, **Then**
+   the other pane is unaffected.
+5. **Given** the two panes are already showing differently-structured paths,
+   **When** the user turns Move sync on, **Then** neither pane immediately
+   re-navigates — syncing takes effect starting with the next navigation action,
+   not retroactively.
 
 ---
 
-### User Story 3 - Safely delete duplicate files (Priority: P3)
+### User Story 3 - Compare the two selected directories (Priority: P3)
 
-From the duplicates view, a user selects which copies of a duplicate group to
-remove, previews exactly what will be deleted, and confirms before anything
-actually happens.
+From whatever pair of directories the two panes currently show, the user presses
+"Compare" to compute and compare checksums for both directories and everything
+beneath them, so they can see — with a color-coded status per entry — exactly
+which files and subdirectories match, differ, or exist on only one side.
 
-**Why this priority**: This is what turns "finding duplicates" into "reclaiming
-space," but it is the highest-risk part of the feature — it must never run ahead
-of the read-only reporting in Story 2, and per the project's safety principle
-for destructive operations, it must always be preview-first.
+**Why this priority**: This is the payoff of the whole tool. It depends on Story
+1 (something to compare) but not on Story 2 (Move sync is a browsing
+convenience, not a prerequisite for comparing whatever the two panes happen to
+show).
 
-**Independent Test**: From a duplicate group of two files, select one for
-deletion, confirm the preview shows exactly that one file and no others, then
-confirm deletion and verify only that file is removed from disk and from the
-registry.
-
-**Acceptance Scenarios**:
-
-1. **Given** a duplicate group is shown, **When** the user selects one or more
-   of its files for deletion, **Then** the tool defaults to pre-selecting all
-   but one file in the group (the user can change any selection before
-   proceeding).
-2. **Given** one or more files are selected for deletion, **When** the user
-   proceeds, **Then** a preview lists exactly the files that would be deleted
-   and none are deleted yet.
-3. **Given** a deletion preview is shown, **When** the user confirms it,
-   **Then** exactly the previewed files are deleted from disk and removed from
-   the registry.
-4. **Given** a deletion preview is shown, **When** the user cancels instead of
-   confirming, **Then** no file is deleted and no registry entry changes.
-5. **Given** a previewed file no longer exists on disk by the time the user
-   confirms (e.g. deleted externally in the meantime), **When** deletion runs,
-   **Then** that entry is skipped without failing the deletion of the other
-   previewed files, and the registry is updated to reflect it's gone.
-6. **Given** indexing or scanning is running, **When** it operates, **Then** it
-   never deletes or modifies any file — deletion only ever happens through this
-   explicit, user-confirmed action.
-
----
-
-### User Story 4 - Find duplicate directories (Priority: P4)
-
-A user opens a view listing every pair of directories whose entire contents —
-every file name, every subdirectory, and all their content — are identical, so
-whole duplicated folder trees (e.g. an accidental double copy of a photo album)
-can be found without comparing them file by file.
-
-**Why this priority**: This is a natural extension of Story 2 once directory
-checksums exist, but it delivers less immediate value on its own — most personal
-duplicate clutter is individual files, not entire identical folder trees — so it
-can follow after the file-level view is in place.
-
-**Independent Test**: Index two separate directory trees that are exact copies
-of each other (same file names, structure, and content) alongside a third,
-similar-looking directory that differs by one file. Open the
-duplicate-directories view and confirm only the first pair is listed.
+**Independent Test**: Point the left pane at a directory and the right pane at
+an identical copy of it, except for one file with different content and one file
+that only exists on the left. Press Compare and confirm the differing file shows
+a "Differs" status, the left-only file shows an "Only on this side" status, and
+every other entry shows "Matching".
 
 **Acceptance Scenarios**:
 
-1. **Given** two indexed directories have the same directory checksum, **When**
-   the user opens the duplicate-directories view, **Then** they are shown
-   together as one duplicate group with their full paths.
-2. **Given** two indexed directories contain the same files but under different
-   names, or in a different substructure, **When** the user views duplicate
-   directories, **Then** they are not shown as a duplicate group.
-3. **Given** a directory is part of a reported duplicate-directory group,
-   **When** the user views the duplicate-files view (Story 2), **Then** the
-   files inside that directory still appear there too if they match other files
-   elsewhere — the two views are independent and neither suppresses entries
-   already covered by the other.
+1. **Given** both panes show a directory, **When** the user presses "Compare",
+   **Then** a recursive checksum computation starts for both directories and
+   everything beneath them.
+2. **Given** a comparison is in progress, **When** the user views either pane's
+   listing, **Then** each direct entry shows one of: Matching, Differs, Only on
+   this side, Scanning, or Error — visually distinguished by color.
+3. **Given** a comparison completes, **When** the user views the listing,
+   **Then** every direct entry in both panes shows a final status, determined by
+   pairing entries with the same name between the two sides and comparing their
+   checksums.
+4. **Given** a comparison already covered a subdirectory, **When** the user (or
+   Move sync) navigates into that subdirectory afterward, **Then** its
+   already-computed comparison status is shown immediately, without needing to
+   press Compare again at that level.
+5. **Given** a pair was already compared and nothing changed on disk, **When**
+   the user presses "Compare" again, **Then** no checksums are recomputed
+   (incremental by default, same behavior as Count and Size's "Scan").
+6. **Given** the user wants to redo a comparison from scratch, **When** they use
+   the separate "Force full re-compare" action, **Then** every checksum for both
+   subtrees is recomputed, ignoring any prior cached results.
+7. **Given** a comparison is active, **When** the user presses Stop, **Then**
+   the comparison is cancelled for both sides and any not-yet-processed entries
+   are left in their prior status (or "Not compared" if this is the first
+   comparison).
+8. **Given** a file's content cannot be fully read during comparison (permission
+   change or I/O error after being listed), **When** that happens, **Then** that
+   entry — and every ancestor directory up to the compared root, on that side —
+   shows an Error status instead of a false Matching or Differs verdict.
 
 ---
 
 ### Edge Cases
 
-- What happens when a file is modified after being indexed but before the user
-  acts on a duplicates report? The report reflects the registry as of the last
-  index, not the file's current state — the tool does not auto-detect staleness,
-  consistent with Count and Size's behavior.
-- What happens when the directory being indexed is itself unreadable when its
-  own procedure starts? That procedure ends in Error, contributing nothing to
-  any parent's directory checksum.
-- What happens when a file passes directory listing but its content fails to be
-  read while computing its checksum (permission change, I/O error, or the file
-  disappearing mid-read)? It is treated the same as an unreadable entry:
-  skipped, and its containing directory and every ancestor up to the indexed
-  root is flagged incomplete with no computable directory checksum, rather than
-  silently producing a checksum that omits it (FR-009, FR-009a).
-- What happens when two directories are both incomplete (e.g. each missing an
-  unrelated unreadable file)? They are never shown as a duplicate pair — only
-  directories with an actual computed checksum can match (FR-009b).
-- What happens to zero-byte files? They are treated like any other file; if two
-  or more share the same (empty) content, they are reported as duplicates.
-- What happens when the user presses "Scan" on a directory that is an ancestor
-  or descendant of one already queued or actively indexing? No duplicate or
-  overlapping procedures are created for the same directory, mirroring Count and
-  Size's behavior.
-- What happens if the application restarts or crashes mid-index? In-flight
-  procedures are surfaced as Stopped, not silently resumed or left showing a
-  misleading in-progress state; a later "Scan" resumes only what's outstanding.
-- What happens when deleting one file from a duplicate group leaves only one
-  file remaining in that group? The group simply stops being reported as a
-  duplicate the next time the duplicates view is loaded.
+- What happens when the user presses "Compare" while another comparison is
+  already active in this tool? Only one comparison scan is active within this
+  tool at a time; the new request is enqueued rather than run concurrently or
+  discarded, mirroring Count and Size's single-active-scan behavior (scoped
+  independently per tool — an active Count and Size scan doesn't block this
+  tool's comparisons or vice versa).
+- What status does an entry show before any comparison has ever run for it? "Not
+  compared" — distinct from "Scanning," which only applies once a comparison
+  covering that entry has actually started.
+- What happens when Move sync is on, a synced move lands one pane in a "not
+  found" state, and the user then navigates that pane manually? Move sync stays
+  on; it is never auto-disabled by a sync failure.
+- What happens when an entry exists on only one side? It shows its own "Only on
+  this side" status — never conflated with "Differs", which means both sides
+  have it but with different content.
+- What happens when Move sync is on and the user presses "up" while a pane is
+  already at the root ("/")? That pane stays at the root (no-op), and the other
+  pane's synced "up" move still applies to its own current directory
+  independently.
+- What happens when both panes are pointed at the very same absolute directory?
+  Comparing it against itself is allowed and trivially reports every entry as
+  Matching.
+- What happens to symlinks or entries that can't be listed at all? Symlinks are
+  ignored (not followed, not checksummed); unreadable entries are skipped and
+  the containing directory is flagged as having unreadable entries on that side,
+  contributing an Error status.
+- What happens when the user turns Move sync on while the two panes are already
+  looking at unrelated paths? Nothing re-navigates immediately; syncing only
+  applies starting with the next navigation action.
+- What happens if the application restarts or crashes mid-comparison? In-flight
+  portions are surfaced as Stopped rather than silently resumed; pressing
+  "Compare" again later only reprocesses what's outstanding.
 
 ## Requirements _(mandatory)_
 
 ### Functional Requirements
 
-- **FR-001**: The system MUST let the user start an indexing procedure rooted at
-  a directory, using the same directory-browsing experience as the Count and
-  Size tool.
-- **FR-002**: Indexing MUST compute a content checksum for every direct file in
-  the indexed directory and MUST recursively create an equivalent indexing
-  procedure for every subdirectory.
-- **FR-003**: Before computing a file's full-content checksum, the system MUST
-  first rule out files that cannot possibly share content using cheaper
-  comparisons (at minimum, file size), and MUST only perform a full-content
-  comparison for files that remain plausible matches after those cheaper
-  comparisons — so files with no same-size counterpart never have their full
-  content read.
-- **FR-004**: Each directory's checksum MUST be derived only from its direct
+- **FR-001**: The system MUST show two independent directory browsers (left and
+  right panes), each starting at the root ("/"), navigable the same way as the
+  Count and Size tool (click a directory to enter it, clicking a file has no
+  effect, an up action to go to the parent) — including that tool's
+  pagination/lazy-loading behavior for a listing with an unusually large number
+  of direct entries, applied independently to each pane.
+- **FR-002**: A "Move sync" toggle MUST be available. While on, any navigation
+  action (entering a subdirectory, or moving up to the parent) performed on
+  either pane MUST also apply the equivalent relative move to the other pane.
+- **FR-002a**: When Move sync is on and the corresponding path doesn't exist on
+  the other side, that pane MUST show a clear "not found" state rather than
+  silently failing or leaving stale content displayed.
+- **FR-002b**: Turning Move sync on MUST NOT itself trigger a navigation on
+  either pane; it MUST only affect navigation actions taken after it was turned
+  on.
+- **FR-002c**: Move sync remaining on after a synced navigation produced a "not
+  found" state (FR-002a) MUST NOT be automatically turned off. If the user then
+  navigates the affected pane manually, Move sync MUST remain in effect for
+  subsequent navigation actions on either pane.
+- **FR-003**: A "Compare" action MUST be available whenever both panes show a
+  directory. Triggering it MUST start a recursive checksum computation and
+  comparison of both currently-shown directories and everything beneath them.
+- **FR-004**: Before computing a file's full-content checksum, the system MUST
+  first rule out files that cannot possibly match using cheaper comparisons (at
+  minimum, file size, then a fast partial-content hash), and MUST only perform a
+  full-content comparison for files that remain plausible matches after those
+  cheaper comparisons.
+- **FR-005**: Each directory's own checksum MUST be derived only from its direct
   entries (each child file's checksum, each child subdirectory's own checksum,
-  and their names/types) — not by re-reading the full recursive contents of the
+  and their names/types), not by re-reading the full recursive contents of the
   subtree on every computation.
-- **FR-005**: A directory checksum MUST change if anything in its subtree
-  changes — a different file, a renamed entry, a different substructure, or
-  different content — and MUST stay the same only when every name, type, and
-  content match exactly.
-- **FR-006**: The default "Scan" action MUST behave incrementally: it MUST skip
-  recomputing a file's checksum when that file's size and modification time are
-  unchanged since it was last indexed, and MUST skip an entire subdirectory
-  whose last indexing procedure completed successfully and remains unaffected by
-  any change beneath it.
-- **FR-007**: A separate, explicit "Force full rescan" action MUST be available
-  that ignores all prior indexing state for the selected directory's subtree and
-  recomputes every checksum in it from scratch.
-- **FR-008**: The system MUST support only one actively-running indexing
-  procedure system-wide at a time; requests made while one is active MUST be
-  enqueued, not run concurrently or discarded.
-- **FR-009**: Symbolic links MUST be ignored during indexing — not followed, not
-  checksummed. Files or subdirectories that cannot be read MUST be skipped, and
-  the containing directory MUST be flagged as having unreadable entries. This
-  applies both when an entry cannot be listed at all (permissions, broken entry)
-  and when a file's content cannot be fully read while computing its checksum
-  after having been listed successfully (e.g. a permission change or I/O error)
-  — either case is skipped and flagged the same way.
-- **FR-009a**: A directory flagged as having unreadable entries (FR-009), or
-  containing a descendant so flagged, MUST NOT have a directory checksum
-  computed — a checksum derived from an incomplete set of children would
-  misrepresent that directory's true content. Such a directory MUST instead be
-  flagged incomplete, and that flag MUST propagate to every ancestor up to the
-  indexed root, none of which can have a trustworthy directory checksum either
-  while it applies.
-- **FR-009b**: The duplicate-directories view (FR-014) MUST only compare
-  directories that have a computed checksum; an incomplete directory (FR-009a)
-  MUST NOT appear in any duplicate-directory group and MUST NOT be treated as
-  matching (or not matching) any other directory, including another incomplete
-  one.
-- **FR-010**: Indexing MUST run asynchronously and MUST NOT block browsing or
-  other interaction with the tool while in progress.
-- **FR-011**: The system MUST provide an explicit Stop action for an active
-  indexing procedure; using it MUST transition the running procedure and its
-  in-flight descendants to a Stopped state.
-- **FR-012**: If the application restarts or crashes while an indexing procedure
-  is in progress, that procedure and its in-flight descendants MUST be surfaced
-  as Stopped rather than silently resumed or shown as still running.
-- **FR-013**: The system MUST provide a view listing every group of two or more
-  indexed files that share an identical content checksum, showing each file's
-  full path and size.
-- **FR-014**: The system MUST provide a separate view listing every group of two
-  or more indexed directories that share an identical directory checksum,
-  showing each directory's full path.
-- **FR-015**: From a duplicate file group, the user MUST be able to select which
-  of its files to delete; the system MUST pre-select all but one file in the
-  group as a starting suggestion, which the user MUST be able to change before
-  proceeding.
-- **FR-016**: Before deleting any selected file, the system MUST show a preview
-  listing exactly the files that would be deleted, and MUST require the user to
-  explicitly confirm that preview before any deletion occurs.
-- **FR-017**: Deletion MUST only occur through the explicit, previewed,
-  user-confirmed action in FR-016; indexing, scanning, or viewing duplicates
-  MUST NOT delete or modify any file as a side effect.
-- **FR-018**: If a previewed file no longer exists on disk when the user
-  confirms deletion, the system MUST skip it without failing the deletion of the
-  other previewed files, and MUST update the registry to reflect that it's gone.
-- **FR-019**: All checksums (file and directory), indexing procedure state, and
-  last-indexed timestamps MUST be persisted so they remain available after an
-  application restart, independently of the Count and Size tool's own persisted
-  data.
-- **FR-020**: The tool MUST be reachable as its own section from the dashboard
+- **FR-006**: Entries MUST be paired between the two sides by name — an entry on
+  one side is compared against the entry of the same name at the corresponding
+  position on the other side, if one exists.
+- **FR-007**: Every entry MUST show one of the following statuses, each visually
+  distinguished by its own color: **Not compared** (no comparison has ever run
+  for this entry), **Matching** (both sides present, identical checksum),
+  **Differs** (both sides present, checksums differ), **Only on this side** (no
+  counterpart on the other side), **Scanning** (comparison still in progress for
+  this entry), or **Error** (couldn't be read or checksummed).
+- **FR-008**: The default "Compare" action MUST behave incrementally: it MUST
+  skip recomputing a file's checksum when its size and modification time are
+  unchanged since it was last computed, and MUST skip a subdirectory whose
+  comparison already completed successfully and remains unaffected by any change
+  beneath it.
+- **FR-009**: A separate, explicit "Force full re-compare" action MUST be
+  available as a single action covering both panes together — triggering it MUST
+  ignore all prior cached checksums for both currently compared subtrees and
+  recompute everything from scratch on both sides; there is no variant that
+  force-recomputes only one side.
+- **FR-010**: The system MUST support only one actively-running comparison scan
+  at a time within this tool; requests made while one is active MUST be
+  enqueued, not run concurrently or discarded. This constraint is scoped to this
+  tool's own comparison scans and is independent of any scan running in the
+  Count and Size tool.
+- **FR-011**: Symbolic links MUST be ignored during comparison — not followed,
+  not checksummed. Files or subdirectories that cannot be read MUST be skipped,
+  and the containing directory MUST be flagged as having unreadable entries.
+  This applies both when an entry cannot be listed at all and when a file's
+  content cannot be fully read while computing its checksum after having been
+  listed successfully.
+- **FR-011a**: A directory flagged as having unreadable entries, or containing a
+  descendant so flagged, MUST NOT have a directory checksum computed for it —
+  such a directory MUST instead show an Error status, and that status MUST
+  propagate to every ancestor up to the compared root on that side, none of
+  which can have a trustworthy checksum either while it applies.
+- **FR-012**: Comparison scanning MUST run asynchronously and MUST NOT block
+  browsing or other interaction with the tool while in progress.
+- **FR-013**: The system MUST provide an explicit Stop action for an active
+  comparison; using it MUST cancel further processing on both sides without
+  losing already-computed results.
+- **FR-014**: If the application restarts or crashes while a comparison is in
+  progress, the affected portions MUST be surfaced as Stopped rather than
+  silently resumed or shown as still running.
+- **FR-015**: Computed checksums (file and directory) and comparison state MUST
+  be persisted, independently of the Count and Size tool's own persisted data,
+  so an incremental "Compare" can skip unchanged entries across sessions and
+  application restarts.
+- **FR-016**: Navigating into a subdirectory that was already covered by a
+  completed comparison MUST show its precomputed status immediately, without
+  requiring the user to press "Compare" again at that level.
+- **FR-017**: The tool MUST be reachable as its own section from the dashboard
   shell's navigation, distinct from the Count and Size tool.
 
 ### Key Entities
 
-- **File Checksum Entry**: One indexed file. Tracks: path, size, modification
-  time as of last index, content checksum, and last-indexed timestamp. Used to
-  skip recomputation (FR-006) and to find file-level duplicate groups (FR-013).
-- **Directory Index Node**: The indexing procedure and result for one directory.
-  Tracks: directory path, state (mirroring Count and Size's Not indexed /
-  Indexing / Completed / Error / Stopped), depth, its own directory checksum
-  (derived from direct entries, absent whenever the node is incomplete), whether
-  it has unreadable entries, whether it is incomplete (itself or any descendant
-  has unreadable entries — FR-009a), and the last-indexed timestamp. Related to
-  its parent's node and to one node per child directory.
-- **Duplicate File Group**: A set of two or more File Checksum Entries sharing
-  the same content checksum.
-- **Duplicate Directory Group**: A set of two or more Directory Index Nodes
-  sharing the same directory checksum.
-- **Deletion Preview**: The user-reviewed, not-yet-executed set of files
-  selected for removal from a Duplicate File Group.
+- **File Checksum Entry**: One checksummed file. Tracks: path, size,
+  modification time as of last computation, content checksum, and last-computed
+  timestamp. Used to skip recomputation (FR-008).
+- **Directory Comparison Node**: The comparison state and result for one
+  directory on one side. Tracks: directory path, state (Not compared / Comparing
+  / Completed / Error / Stopped), depth, its own directory checksum (derived
+  from direct entries, absent whenever the node is incomplete), whether it has
+  unreadable entries, and the last-computed timestamp. Related to its parent's
+  node and to one node per child directory.
+- **Comparison Pair**: The left path and right path currently selected for
+  comparison, together with the overall state of comparing them. Ephemeral —
+  reflects only what the two panes currently show, not a persisted history of
+  past pairs (see Assumptions).
+- **Entry Comparison Result**: The per-entry outcome shown in the listing — one
+  of Not compared, Matching, Differs, Only on this side, Scanning, or Error —
+  derived by pairing left and right entries by name (FR-006) and comparing their
+  checksums.
+- **Move Sync Setting**: Whether the two panes' navigation is currently linked
+  (FR-002).
 
 ## Success Criteria _(mandatory)_
 
 ### Measurable Outcomes
 
-- **SC-001**: After indexing a directory, a user can view every group of files
-  with identical content within it, without having to compare any files
-  manually.
-- **SC-002**: For a tree containing large files with no same-size counterpart
-  anywhere else in the tree, indexing never reads those files' full content —
-  comparison is resolved from cheaper checks alone.
-- **SC-003**: A user can identify whole duplicated directory trees (same
-  structure and content) without opening and comparing their contents directory
-  by directory.
-- **SC-004**: No file is ever deleted by this tool without the user first seeing
-  an exact preview of what would be removed and explicitly confirming it.
-- **SC-005**: Re-running an index on an already fully-indexed, unchanged
-  directory does no redundant work — no file content is re-read and no checksum
-  is recomputed.
-- **SC-006**: Interrupting the application mid-index and restarting it does not
-  lose previously computed checksums; resuming an index only processes what was
-  left outstanding.
+- **SC-001**: A user can browse two directories independently, and, with Move
+  sync on, explore two mirrored trees while only navigating one side manually.
+- **SC-002**: After pressing "Compare", a user can tell — for every entry in
+  both panes, at a glance via color — whether it matches, differs, exists on
+  only one side, is still being compared, or hit an error, without opening any
+  file.
+- **SC-003**: Comparing two directories with no differences reports every entry
+  as Matching.
+- **SC-004**: For a pair of directories containing large files with no same-size
+  counterpart, comparison never reads those files' full content.
+- **SC-005**: Re-comparing an already fully-compared, unchanged pair does no
+  redundant work — no file content is re-read and no checksum is recomputed.
+- **SC-006**: Cancelling an active comparison stops further computation
+  immediately without losing or corrupting previously computed results.
+- **SC-007**: Interrupting the application mid-comparison and restarting it does
+  not lose previously computed checksums; resuming a comparison only processes
+  what was left outstanding.
 
 ## Assumptions
 
-- The checksum comparison strategy is a cascade: same file size first, then a
-  fast partial-content hash, then a full-content checksum (SHA-256) only for
-  files still matching after both — chosen so indexing large personal file
-  collections (including large media files) doesn't require reading every byte
-  of every file.
-- Directory checksums are structure-and-content sensitive (Merkle-tree style,
-  like Git tree objects): two directories are only considered duplicates when
-  every child name, type, and content match exactly, not merely when they
-  contain the same content under different names or organization.
+- Entries are paired between the two sides strictly by name at the corresponding
+  relative position within the compared directories — not by any content-based
+  fuzzy matching.
+- "Only on this side" is kept as a status distinct from "Differs" (both sides
+  present, different content), since collapsing them would lose information a
+  user needs to decide what to do next.
+- Toggling Move sync on does not itself cause a navigation; it only takes effect
+  starting with the next navigation action, so switching it on while the two
+  panes are unrelated doesn't cause a surprising jump.
+- The checksum comparison strategy (cascade: file size, then a partial- content
+  hash, then a full-content SHA-256 checksum only for files still matching after
+  both), the Merkle-tree-style directory checksum (structure- and-content
+  sensitive, derived bottom-up from immediate children), and reuse of the shared
+  scan/traverse/stop/resume engine already built for Count and Size all carry
+  over unchanged from the original design.
 - Persistence uses its own embedded SQLite database, separate from the Count and
-  Size tool's, so neither tool's data can be corrupted or blocked by the other.
-- This tool reuses the same underlying scan/traverse/stop/resume mechanics
-  already built for Count and Size, since both need identical tree-walking
-  behavior; only the per-file/per-directory computation differs.
-- The duplicate-files view and duplicate-directories view are independent and do
-  not suppress or collapse entries covered by the other — a file inside a
-  reported duplicate directory still appears in the file-level view too, per
-  Story 4's acceptance scenario 3.
+  Size tool's.
+- A global duplicate registry/search across the whole filesystem, and any file
+  deletion action, are out of scope for this spec — deferred to a later feature
+  that can build on this tool's checksum-computation infrastructure.
+- This tool is read-only: it never deletes, moves, or modifies files, so the
+  project's dry-run/confirmation requirement for destructive operations does not
+  apply to it.
 - Hard links are treated as ordinary files, consistent with Count and Size's
   precedent — detecting and special-casing shared inodes is out of scope.
-- Registry entries for files or directories removed from disk since the last
-  index are not automatically pruned; they remain until the next index that
-  covers that subtree, consistent with Count and Size's no-auto-staleness-
-  detection precedent — except entries removed via this tool's own deletion
-  action (FR-018), which are updated immediately.
+- There is no comparison history feature: the tool doesn't remember or list
+  previously compared pairs, only whatever the two panes currently show.
+  Underlying file/directory checksums still persist per path independently of
+  any particular pairing (FR-015), so revisiting an already-computed path on
+  either side in a later comparison still benefits from FR-008's incremental
+  skip — only a genuinely new path needs computing.
 - No automated tests are included, per the project's manual-verification-only
-  principle; correctness is verified by running the app and exercising the scan,
-  duplicate-view, and deletion flows end-to-end.
-- The separate "compare two arbitrary directories" tool (tracked as TODO T001)
-  is a later, different feature that would consume this registry; it is out of
-  scope for this spec.
+  principle; correctness is verified by running the app and exercising the
+  browsing, sync, compare, cancel, and incremental/full-recompare flows
+  end-to-end.
