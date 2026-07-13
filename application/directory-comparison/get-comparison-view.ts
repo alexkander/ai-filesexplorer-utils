@@ -80,6 +80,11 @@ export interface ComparisonView {
    * discovered by listing a shared parent). `null` iff Pass 1 has never
    * listed that exact path (no Compare has reached it yet). */
   ownStatus: EntryComparisonStatus | null;
+  /** `leftPath`/`rightPath`'s own Merkle checksum — same rule as a child
+   * directory's `leftChecksum`/`rightChecksum`: only ever non-null when
+   * `ownStatus` is `matching` (compareSubtree discards both sides' value
+   * the moment a pair `differs`, so there's nothing to show otherwise). */
+  ownChecksum: string | null;
   /** Count and Size's read-only overlay for `leftPath`/`rightPath`
    * themselves (same source `ListedEntry.sizeInfo` uses for each child in
    * `ComparisonPane`) — `null` iff Count and Size has never scanned that
@@ -167,6 +172,8 @@ export async function getComparisonView(
       : ownLeftNode && ownRightNode
         ? deriveDirectoryNodeStatus(ownLeftNode, ownRightNode)
         : null;
+  const ownChecksum: string | null =
+    ownStatus === 'matching' ? (ownLeftNode?.directoryChecksum ?? null) : null;
 
   const leftSizeInfo = sizeInfoPort.getSizeInfo(leftPath);
   const rightSizeInfo = sizeInfoPort.getSizeInfo(rightPath);
@@ -318,6 +325,7 @@ export async function getComparisonView(
     activePair: activePath !== null ? activePair : null,
     entries,
     ownStatus,
+    ownChecksum,
     leftSizeInfo,
     rightSizeInfo,
   };

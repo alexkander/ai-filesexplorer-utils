@@ -64,9 +64,11 @@ function activePathForSide(
  * other entry. */
 function PaneOwnInfo({
   sizeInfo,
+  checksum,
   status,
 }: {
   sizeInfo: SizeInfo | null | undefined;
+  checksum: string | null | undefined;
   status: EntryComparisonStatus | null | undefined;
 }) {
   return (
@@ -84,6 +86,11 @@ function PaneOwnInfo({
               (partial)
             </span>
           )}
+        </span>
+      )}
+      {checksum && (
+        <span className="font-mono" title={`Full checksum: ${checksum}`}>
+          {checksum.slice(0, 8)}
         </span>
       )}
       {status && (
@@ -268,6 +275,7 @@ export function DirectoryComparisonExplorer() {
             </p>
             <PaneOwnInfo
               sizeInfo={view?.leftSizeInfo}
+              checksum={view?.ownChecksum}
               status={view?.ownStatus}
             />
           </div>
@@ -311,6 +319,7 @@ export function DirectoryComparisonExplorer() {
             </p>
             <PaneOwnInfo
               sizeInfo={view?.rightSizeInfo}
+              checksum={view?.ownChecksum}
               status={view?.ownStatus}
             />
           </div>
