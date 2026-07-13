@@ -92,4 +92,13 @@ export interface ComparisonRepositoryPort {
   // full re-compare means every entry genuinely goes back to not_compared
   // until Pass 2 concludes something fresh).
   clearChecksumsInSubtree(path: string): void;
+  // Pass 2 only, `mode: 'incremental'` cache-hit shortcut: `isCacheStillValid`
+  // already confirmed (recursively) that every directory in this subtree has
+  // a non-null checksum and every file/subdirectory under it is still fresh
+  // — so the shortcut skips re-deriving anything, but every directory in the
+  // subtree still needs resolvedByPass2 = true, or it stays stuck showing
+  // not_compared forever (it was cached before resolvedByPass2 existed, or
+  // before its own last real Pass 2 conclusion). Only touches rows that
+  // already have a directory_checksum, matching isCacheStillValid's guard.
+  markSubtreeResolved(path: string): void;
 }

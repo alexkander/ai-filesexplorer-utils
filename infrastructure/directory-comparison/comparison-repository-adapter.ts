@@ -182,6 +182,13 @@ const clearDirChecksumsInSubtreeStmt = db.prepare(`
   WHERE path = @path OR path LIKE @likePattern ESCAPE '\\'
 `);
 
+const markSubtreeResolvedStmt = db.prepare(`
+  UPDATE directory_comparison_nodes
+  SET resolved_by_pass2 = 1
+  WHERE (path = @path OR path LIKE @likePattern ESCAPE '\\')
+    AND directory_checksum IS NOT NULL
+`);
+
 const deleteFileStmt = db.prepare(
   `DELETE FROM file_checksums WHERE path = @path`,
 );
@@ -274,6 +281,11 @@ export const comparisonRepositoryAdapter: ComparisonRepositoryPort = {
     const likePattern = subtreeLikePattern(path);
     clearFileChecksumsInSubtreeStmt.run({ path, likePattern });
     clearDirChecksumsInSubtreeStmt.run({ path, likePattern });
+  },
+
+  markSubtreeResolved(path) {
+    const likePattern = subtreeLikePattern(path);
+    markSubtreeResolvedStmt.run({ path, likePattern });
   },
 
   deleteFile(path) {

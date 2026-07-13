@@ -257,6 +257,8 @@ export async function compareSubtree(
     isCacheStillValid(leftNode, comparisonRepository) &&
     isCacheStillValid(rightNode, comparisonRepository)
   ) {
+    comparisonRepository.markSubtreeResolved(leftNode.path);
+    comparisonRepository.markSubtreeResolved(rightNode.path);
     return {
       cancelled: false,
       matching: true,
