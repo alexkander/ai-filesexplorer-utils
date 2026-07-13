@@ -82,6 +82,24 @@ const getSubtreeStmt = db.prepare(`
   SELECT n.* FROM directory_scan_nodes n JOIN subtree s ON n.path = s.path
 `);
 
+const getDirectChildrenStmt = db.prepare(
+  `SELECT * FROM directory_scan_nodes WHERE parent_path = ?`,
+);
+
+// LIKE with an escaped path prefix — path values are absolute filesystem
+// paths, not user-controlled LIKE patterns, but '%'/'_' can still appear in
+// real directory names, so they're escaped (same convention as
+// directory-comparison's comparison-repository-adapter.ts).
+function subtreeLikePattern(path: string): string {
+  const escaped = path.replace(/[%_]/g, '\\$&');
+  return (escaped === '/' ? '' : escaped) + '/%';
+}
+
+const deleteDirSubtreeStmt = db.prepare(`
+  DELETE FROM directory_scan_nodes
+  WHERE path = @path OR path LIKE @likePattern ESCAPE '\\'
+`);
+
 export const scanRepositoryAdapter: ScanRepositoryPort = {
   upsertPending(path, parentPath, depth) {
     upsertStmt.run({ path, parentPath, depth });
@@ -120,5 +138,14 @@ export const scanRepositoryAdapter: ScanRepositoryPort = {
     if (!self) return [];
     const rest = rows.filter((r) => r.path !== targetPath);
     return [toNode(self), ...rest.map(toNode)];
+  },
+
+  getDirectChildren(path) {
+    return (getDirectChildrenStmt.all(path) as Row[]).map(toNode);
+  },
+
+  deleteDirectorySubtree(path) {
+    const likePattern = subtreeLikePattern(path);
+    deleteDirSubtreeStmt.run({ path, likePattern });
   },
 };

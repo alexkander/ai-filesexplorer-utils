@@ -13,3 +13,18 @@ export function getParentPath(path: string): string | null {
   parts.pop();
   return parts.length === 0 ? '/' : '/' + parts.join('/');
 }
+
+/** The final path segment, e.g. "c" for both "/a/b/c" and "/c". */
+export function getName(path: string): string {
+  const parts = segments(path);
+  return parts[parts.length - 1] ?? '';
+}
+
+export function joinChildPath(parentPath: string, name: string): string {
+  return parentPath === '/' ? `/${name}` : `${parentPath}/${name}`;
+}
+
+/** True if `path` is `root` itself or anywhere within `root`'s subtree. */
+export function isWithinSubtree(path: string, root: string): boolean {
+  return path === root || path.startsWith(root === '/' ? '/' : root + '/');
+}

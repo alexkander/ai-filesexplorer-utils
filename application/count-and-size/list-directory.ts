@@ -1,5 +1,9 @@
-import type { FileSystemPort, RawEntry } from '@/application/scanning/filesystem-port';
+import type {
+  FileSystemPort,
+  RawEntry,
+} from '@/application/scanning/filesystem-port';
 import type { ScanRepositoryPort } from './scan-repository-port';
+import type { ChecksumInfoPort } from './checksum-info-port';
 import type { EntryKind } from '@/domain/scanning/should-ignore-entry';
 import {
   deriveDirectoryView,
@@ -17,6 +21,14 @@ export interface ListedEntry {
   size?: number;
   /** Directories only, and only when scan data exists (FR-004). */
   scanStatus?: DirectoryView;
+  /** Files and directories, read-only overlay from the separate
+   * directory-comparison tool's own database (user request, mirrors the
+   * reverse overlay directory-comparison already has for this tool's own
+   * size info) — the full checksum last persisted for this exact path.
+   * `undefined` when directory-comparison has never touched this path (or,
+   * for a directory, its last comparison `differ`red — only a `matching`
+   * directory has a per-side checksum persisted at all). */
+  checksum?: string;
 }
 
 export interface ListDirectoryResult {
@@ -79,6 +91,7 @@ export async function listDirectory(
   sortDir: SortDir,
   fileSystem: FileSystemPort,
   scanRepository: ScanRepositoryPort,
+  checksumInfoPort?: ChecksumInfoPort,
 ): Promise<ListDirectoryOutcome> {
   const outcome = await fileSystem.listChildren(targetPath);
   if (!outcome.ok) return { ok: false };
@@ -148,10 +161,16 @@ export async function listDirectory(
         name: entry.name,
         type: 'directory',
         scanStatus: view.state === 'not_scanned' ? undefined : view,
+        checksum: checksumInfoPort?.getChecksum(entry.path) ?? undefined,
       };
     }
     if (entry.kind === 'file') {
-      return { name: entry.name, type: 'file', size: entry.size };
+      return {
+        name: entry.name,
+        type: 'file',
+        size: entry.size,
+        checksum: checksumInfoPort?.getChecksum(entry.path) ?? undefined,
+      };
     }
     return { name: entry.name, type: entry.kind };
   });

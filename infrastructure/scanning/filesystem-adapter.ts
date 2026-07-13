@@ -11,6 +11,11 @@ function isUnreadableError(error: unknown): boolean {
   return code === 'EACCES' || code === 'EPERM' || code === 'ENOENT';
 }
 
+function isNotFoundError(error: unknown): boolean {
+  const code = (error as NodeJS.ErrnoException)?.code;
+  return code === 'ENOENT' || code === 'ENOTDIR';
+}
+
 async function toRawEntry(
   dirPath: string,
   dirent: import('fs').Dirent,
@@ -32,6 +37,7 @@ async function toRawEntry(
       path: entryPath,
       kind: 'file',
       size: stats.size,
+      modificationTime: stats.mtime.toISOString(),
     };
   } catch (error) {
     if (isUnreadableError(error)) {
@@ -52,6 +58,7 @@ export const filesystemAdapter: FileSystemPort = {
     try {
       dirents = await fs.readdir(dirPath, { withFileTypes: true });
     } catch (error) {
+      if (isNotFoundError(error)) return { ok: false, reason: 'not_found' };
       if (isUnreadableError(error)) return { ok: false, reason: 'unreadable' };
       throw error;
     }
@@ -61,5 +68,17 @@ export const filesystemAdapter: FileSystemPort = {
     );
 
     return { ok: true, result: { entries } };
+  },
+
+  async pathExists(targetPath: string): Promise<boolean> {
+    try {
+      await fs.stat(targetPath);
+      return true;
+    } catch (error) {
+      if (isNotFoundError(error)) return false;
+      // A transient/permission error isn't proof the path is gone — treat
+      // it as "still there" rather than risk pruning a row over a blip.
+      return true;
+    }
   },
 };

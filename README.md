@@ -39,9 +39,17 @@ The service runs with `network_mode: host`, so it's directly available at
 hot-reload; `node_modules` and `.next` live in anonymous volumes inside the
 container so they don't clash with the host's.
 
-This same `docker-compose.yml` is used by `.devcontainer/devcontainer.json` (VS
-Code Dev Containers extension), so both containerized development paths share
-the exact same image and configuration — nothing is duplicated between them.
+## Development with Dev Containers
+
+`.devcontainer/devcontainer.json` (VS Code Dev Containers extension) is
+independent from the `Dockerfile` and `docker-compose.yml` above: it starts
+from the plain `node:22-bookworm-slim` base image and runs
+`corepack enable && pnpm install --frozen-lockfile` via `postCreateCommand`.
+`node_modules` and `.next` are kept in named volumes
+(`ai-filesexplorer-utils-node_modules`, `ai-filesexplorer-utils-next`) so they
+persist across container rebuilds without clashing with the host's. Once the
+container is up, run `pnpm dev` in its integrated terminal to start the dev
+server (not started automatically).
 
 ## Production with Docker
 

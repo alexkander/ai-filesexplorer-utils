@@ -1,6 +1,6 @@
 import { ScanEngine } from '@/infrastructure/scanning/scan-engine';
 import { processDirectory } from '@/application/count-and-size/process-directory';
-import { filesystemAdapter } from './filesystem-adapter';
+import { filesystemAdapter } from '@/infrastructure/scanning/filesystem-adapter';
 import { scanRepositoryAdapter } from './scan-repository-adapter';
 
 /**
@@ -11,5 +11,11 @@ import { scanRepositoryAdapter } from './scan-repository-adapter';
 export const scanWorker = new ScanEngine(
   scanRepositoryAdapter,
   (path, mode, doneSet) =>
-    processDirectory(path, filesystemAdapter, scanRepositoryAdapter, mode, doneSet),
+    processDirectory(
+      path,
+      filesystemAdapter,
+      scanRepositoryAdapter,
+      mode,
+      doneSet,
+    ),
 );

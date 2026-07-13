@@ -283,6 +283,14 @@ export function DirectoryBrowser({
                     {humanizeSize(entry.size)}
                   </span>
                 )}
+                {entry.checksum && (
+                  <span
+                    className="font-mono"
+                    title={`Full checksum (from Compare Directories): ${entry.checksum}`}
+                  >
+                    {entry.checksum.slice(0, 8)}
+                  </span>
+                )}
                 {entry.type === 'directory' && (
                   <>
                     {entry.scanStatus && (
