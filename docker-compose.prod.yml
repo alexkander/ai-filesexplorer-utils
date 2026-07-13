@@ -8,7 +8,5 @@ services:
       - '3000:3000'
     restart: unless-stopped
     volumes:
-      - count-and-size-data:/app/data
-
-volumes:
-  count-and-size-data:
+      - ./data:/app/data
+      - ${MYFILES}:${MYFILES}

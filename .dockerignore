@@ -1,2 +1,21 @@
 node_modules
+.pnpm-store
 .next
+next-env.d.ts
+tsconfig.tsbuildinfo
+
+# SQLite persistence (Count and Size / Directory Comparison) — dev-only
+# data mounted as a volume at runtime, never needed in the build context.
+data
+
+# Editor/AI tooling, docs, specs — irrelevant to building or running the app.
+.claude
+.specify
+.devcontainer
+.husky
+specs
+README.md
+TODO.md
+
+# NOT excluded: .git — next.config.ts's getCommitHash() shells out to
+# `git rev-parse --short HEAD` during `pnpm run build` in the builder stage.

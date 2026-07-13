@@ -1,6 +1,10 @@
 .claude/settings.local.json
 CLAUDE.local.md
 
+# docker-compose variable substitution (THEZONE_PATH etc.) — machine-local,
+# see .env.example for the template.
+.env
+
 # Next.js / Node
 node_modules/
 .pnpm-store/
@@ -8,5 +12,9 @@ node_modules/
 next-env.d.ts
 tsconfig.tsbuildinfo
 
-# Count and size tool — SQLite persistence (specs/002-count-and-size)
-data/
+# Count and size tool — SQLite persistence (specs/002-count-and-size).
+# The directory itself is tracked (see data/.gitkeep) so it exists on a
+# fresh clone for the docker-compose bind mount; only its contents are
+# ignored.
+data/*
+!data/.gitkeep
