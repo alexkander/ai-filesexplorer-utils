@@ -148,11 +148,17 @@ export function DirectoryComparisonExplorer() {
 
   const leftStatusByName = new Map<string, EntryComparisonStatus>();
   const rightStatusByName = new Map<string, EntryComparisonStatus>();
+  const leftChecksumByName = new Map<string, string | null>();
+  const rightChecksumByName = new Map<string, string | null>();
   for (const entry of view?.entries ?? []) {
-    if (entry.status !== 'only_right')
+    if (entry.status !== 'only_right') {
       leftStatusByName.set(entry.name, entry.status);
-    if (entry.status !== 'only_left')
+      leftChecksumByName.set(entry.name, entry.leftChecksum);
+    }
+    if (entry.status !== 'only_left') {
       rightStatusByName.set(entry.name, entry.status);
+      rightChecksumByName.set(entry.name, entry.rightChecksum);
+    }
   }
 
   const navigateInto = (pane: 'left' | 'right', name: string) => {
@@ -271,6 +277,7 @@ export function DirectoryComparisonExplorer() {
               side="left"
               onNavigate={(name) => navigateInto('left', name)}
               statusByName={leftStatusByName}
+              checksumByName={leftChecksumByName}
               refreshToken={leftRefreshToken}
               onCopyToOtherSide={(name) => copyToOtherSide('left', name)}
             />
@@ -313,6 +320,7 @@ export function DirectoryComparisonExplorer() {
               side="right"
               onNavigate={(name) => navigateInto('right', name)}
               statusByName={rightStatusByName}
+              checksumByName={rightChecksumByName}
               refreshToken={rightRefreshToken}
               onCopyToOtherSide={(name) => copyToOtherSide('right', name)}
             />

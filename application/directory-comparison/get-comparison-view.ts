@@ -191,6 +191,8 @@ export async function getComparisonView(
   const entries: EntryComparisonResult[] = pairs.map((pair) => {
     const kind = (pair.left ?? pair.right)!.kind;
 
+    const noChecksum = { leftChecksum: null, rightChecksum: null } as const;
+
     if (!pair.left) {
       const rightNode = rightDirsByName.get(pair.name);
       if (
@@ -198,9 +200,14 @@ export async function getComparisonView(
         rightNode &&
         isEmptyDirectorySubtree(rightNode, comparisonRepository)
       ) {
-        return { name: pair.name, kind, status: 'matching_empty' };
+        return {
+          name: pair.name,
+          kind,
+          status: 'matching_empty',
+          ...noChecksum,
+        };
       }
-      return { name: pair.name, kind, status: 'only_right' };
+      return { name: pair.name, kind, status: 'only_right', ...noChecksum };
     }
     if (!pair.right) {
       const leftNode = leftDirsByName.get(pair.name);
@@ -209,19 +216,24 @@ export async function getComparisonView(
         leftNode &&
         isEmptyDirectorySubtree(leftNode, comparisonRepository)
       ) {
-        return { name: pair.name, kind, status: 'matching_empty' };
+        return {
+          name: pair.name,
+          kind,
+          status: 'matching_empty',
+          ...noChecksum,
+        };
       }
-      return { name: pair.name, kind, status: 'only_left' };
+      return { name: pair.name, kind, status: 'only_left', ...noChecksum };
     }
     if (pair.left.kind !== pair.right.kind) {
-      return { name: pair.name, kind, status: 'differs' };
+      return { name: pair.name, kind, status: 'differs', ...noChecksum };
     }
 
     if (kind === 'directory') {
       const leftNode = leftDirsByName.get(pair.name);
       const rightNode = rightDirsByName.get(pair.name);
       if (!leftNode || !rightNode) {
-        return { name: pair.name, kind, status: 'not_compared' };
+        return { name: pair.name, kind, status: 'not_compared', ...noChecksum };
       }
       const childLeftPath = leftNode.path;
       const childRightPath = rightNode.path;
@@ -233,42 +245,56 @@ export async function getComparisonView(
           (isWithinSubtree(comparisonActivePath.left, childLeftPath) ||
             isWithinSubtree(comparisonActivePath.right, childRightPath)))
       ) {
-        return { name: pair.name, kind, status: 'scanning' };
+        return { name: pair.name, kind, status: 'scanning', ...noChecksum };
       }
+      const status = deriveDirectoryNodeStatus(leftNode, rightNode);
+      // compareSubtree only ever persists a directory's Merkle checksum
+      // when both sides matched — the moment they `differ` it discards
+      // both (writes `null`), since a mismatching root isn't independently
+      // meaningful per side. So there's genuinely nothing to show outside
+      // the `matching` case, not just a display choice.
+      const checksum =
+        status === 'matching' ? leftNode.directoryChecksum : null;
       return {
         name: pair.name,
         kind,
-        status: deriveDirectoryNodeStatus(leftNode, rightNode),
+        status,
+        leftChecksum: checksum,
+        rightChecksum: checksum,
       };
     }
 
     const leftFile = leftFilesByName.get(pair.name);
     const rightFile = rightFilesByName.get(pair.name);
     if (!leftFile || !rightFile) {
-      return { name: pair.name, kind, status: 'not_compared' };
+      return { name: pair.name, kind, status: 'not_compared', ...noChecksum };
     }
+    const fileChecksums = {
+      leftChecksum: leftFile.fullChecksum,
+      rightChecksum: rightFile.fullChecksum,
+    };
 
     if (leftFile.hasReadError || rightFile.hasReadError) {
-      return { name: pair.name, kind, status: 'error' };
+      return { name: pair.name, kind, status: 'error', ...fileChecksums };
     }
     if (leftFile.fullChecksum !== null && rightFile.fullChecksum !== null) {
       const status: EntryComparisonStatus =
         leftFile.fullChecksum === rightFile.fullChecksum
           ? 'matching'
           : 'differs';
-      return { name: pair.name, kind, status };
+      return { name: pair.name, kind, status, ...fileChecksums };
     }
     // Not yet fully resolved — a cheaper cascade stage may already have
     // proven a difference even without a full checksum on either side.
     if (leftFile.size !== rightFile.size) {
-      return { name: pair.name, kind, status: 'differs' };
+      return { name: pair.name, kind, status: 'differs', ...fileChecksums };
     }
     if (
       leftFile.partialChecksum !== null &&
       rightFile.partialChecksum !== null &&
       leftFile.partialChecksum !== rightFile.partialChecksum
     ) {
-      return { name: pair.name, kind, status: 'differs' };
+      return { name: pair.name, kind, status: 'differs', ...fileChecksums };
     }
     // compare-subtree.ts reports this exact file pair as the active unit
     // once it actually needs to read content — so only the file genuinely
@@ -282,6 +308,7 @@ export async function getComparisonView(
       name: pair.name,
       kind,
       status: thisFileActive ? 'scanning' : 'not_compared',
+      ...fileChecksums,
     };
   });
 

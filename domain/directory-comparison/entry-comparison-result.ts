@@ -17,6 +17,18 @@ export interface EntryComparisonResult {
   name: string;
   kind: 'file' | 'directory';
   status: EntryComparisonStatus;
+  /** The full checksum actually persisted for this exact entry on each
+   * side, independent of the other side's value — a file always has its
+   * own real value once computed (even when it `differs`, so both sides'
+   * hashes can be inspected side by side). A directory only ever has one
+   * when `status` is `matching` (or `matching_empty`, though that case is
+   * never a Merkle participant) — `compareSubtree` deliberately discards
+   * both sides' directory checksum (persists `null`) the moment they
+   * `differ`, since a mismatching Merkle root isn't independently
+   * meaningful per side. `null` means "no value persisted", not
+   * necessarily "differs". */
+  leftChecksum: string | null;
+  rightChecksum: string | null;
 }
 
 export interface PairableEntry {

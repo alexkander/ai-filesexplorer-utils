@@ -45,6 +45,7 @@ export function ComparisonPane({
   side,
   onNavigate,
   statusByName,
+  checksumByName,
   refreshToken,
   onCopyToOtherSide,
 }: {
@@ -60,6 +61,12 @@ export function ComparisonPane({
   /** From the shared `useComparisonStatus` poll (one per pair, not per
    * pane) — `undefined` before any Compare has ever been pressed. */
   statusByName?: Map<string, EntryComparisonStatus>;
+  /** This side's own persisted full checksum per entry name (file's full
+   * checksum, or a directory's Merkle root when it matched) — `undefined`
+   * before any Compare, `null` per-entry when nothing's persisted yet (see
+   * `EntryComparisonResult.leftChecksum`/`rightChecksum` for exactly when
+   * that happens). */
+  checksumByName?: Map<string, string | null>;
   /** Bumped by the parent after a copy lands a new entry on this side, to
    * force a re-fetch of this pane's own listing (which otherwise only
    * re-fetches when `path` itself changes). */
@@ -149,6 +156,7 @@ export function ComparisonPane({
       <ul className="flex flex-col divide-y">
         {entries.map((entry) => {
           const status = statusByName?.get(entry.name);
+          const checksum = checksumByName?.get(entry.name);
           return (
             <li
               key={entry.name}
@@ -201,6 +209,14 @@ export function ComparisonPane({
                       (partial)
                     </span>
                   )}
+                </span>
+              )}
+              {checksum && (
+                <span
+                  className="shrink-0 font-mono text-xs text-muted-foreground"
+                  title={`Full checksum: ${checksum}`}
+                >
+                  {checksum.slice(0, 8)}
                 </span>
               )}
               {status && (
