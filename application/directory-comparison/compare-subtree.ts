@@ -149,15 +149,20 @@ async function compareFilePair(
   signal: AbortSignal,
   onProgress?: (leftPath: string, rightPath: string) => void,
 ): Promise<FileCompareResult> {
+  // A file previously flagged with a read error gets its cached checksums
+  // treated as absent (rather than trusted as-is), so the cascade below
+  // requests a fresh read for it even in incremental mode — a prior failure
+  // (e.g. a transient I/O hiccup) deserves another attempt on every compare,
+  // not just a "Force full re-compare".
   let left: FileCascadeSide = {
     size: leftFile.size,
-    partialChecksum: leftFile.partialChecksum,
-    fullChecksum: leftFile.fullChecksum,
+    partialChecksum: leftFile.hasReadError ? null : leftFile.partialChecksum,
+    fullChecksum: leftFile.hasReadError ? null : leftFile.fullChecksum,
   };
   let right: FileCascadeSide = {
     size: rightFile.size,
-    partialChecksum: rightFile.partialChecksum,
-    fullChecksum: rightFile.fullChecksum,
+    partialChecksum: rightFile.hasReadError ? null : rightFile.partialChecksum,
+    fullChecksum: rightFile.hasReadError ? null : rightFile.fullChecksum,
   };
 
   for (;;) {

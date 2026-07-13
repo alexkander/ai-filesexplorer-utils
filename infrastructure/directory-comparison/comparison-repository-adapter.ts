@@ -152,7 +152,8 @@ const recordChecksumsStmt = db.prepare(`
   UPDATE file_checksums
   SET partial_checksum = COALESCE(@partialChecksum, partial_checksum),
       full_checksum = COALESCE(@fullChecksum, full_checksum),
-      checksummed_at = @now
+      checksummed_at = @now,
+      has_read_error = 0
   WHERE path = @path
 `);
 
