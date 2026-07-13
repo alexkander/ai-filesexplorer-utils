@@ -20,4 +20,9 @@ export type ListChildrenOutcome =
 
 export interface FileSystemPort {
   listChildren(path: string): Promise<ListChildrenOutcome>;
+
+  /** Cheap existence check (a single stat, no directory read) — used where
+   * a caller already knows a path and just needs to confirm it's still
+   * there, without paying for a full `listChildren` walk of it. */
+  pathExists(path: string): Promise<boolean>;
 }

@@ -24,4 +24,15 @@ export interface ScanRepositoryPort {
 
   /** `path`'s own row (if any) plus every descendant row, self first. */
   getSubtree(path: string): DirectoryScanNode[];
+
+  /** `path`'s direct child directory rows (not recursive) — used to detect
+   * a previously-tracked subdirectory that no longer appears in a fresh
+   * listing (deleted, renamed, or replaced by a file), so its row doesn't
+   * linger forever. */
+  getDirectChildren(path: string): DirectoryScanNode[];
+
+  /** Removes `path`'s own row AND every descendant row beneath it — for a
+   * subdirectory that vanished (or changed kind) since the last scan, so
+   * it stops being reported as if it still existed. */
+  deleteDirectorySubtree(path: string): void;
 }

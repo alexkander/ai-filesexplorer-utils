@@ -69,4 +69,16 @@ export const filesystemAdapter: FileSystemPort = {
 
     return { ok: true, result: { entries } };
   },
+
+  async pathExists(targetPath: string): Promise<boolean> {
+    try {
+      await fs.stat(targetPath);
+      return true;
+    } catch (error) {
+      if (isNotFoundError(error)) return false;
+      // A transient/permission error isn't proof the path is gone — treat
+      // it as "still there" rather than risk pruning a row over a blip.
+      return true;
+    }
+  },
 };
