@@ -1,6 +1,12 @@
 export type EntryComparisonStatus =
   | 'not_compared'
   | 'matching'
+  // A directory that exists on only one side, where that side's entire
+  // subtree (recursively) contains no files — treated as equivalent to a
+  // non-existent directory on the other side rather than as a mismatch, but
+  // kept distinct from plain `matching` so the UI can still hint that
+  // there's nothing actually being compared here.
+  | 'matching_empty'
   | 'differs'
   | 'only_left'
   | 'only_right'

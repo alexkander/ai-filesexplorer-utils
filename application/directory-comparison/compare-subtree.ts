@@ -18,6 +18,7 @@ import {
 } from '@/domain/directory-comparison/derive-directory-checksum';
 import { getName } from '@/domain/scanning/path-info';
 import type { ScanMode } from '@/domain/scanning/scan-stack';
+import { isEmptyDirectorySubtree } from './is-empty-directory-subtree';
 
 export interface CompareSubtreeDeps {
   comparisonRepository: ComparisonRepositoryPort;
@@ -317,7 +318,25 @@ export async function compareSubtree(
   for (const pair of pairs) {
     if (options.signal.aborted) return CANCELLED_RESULT;
 
-    if (!pair.left || !pair.right || pair.left.kind !== pair.right.kind) {
+    if (!pair.left || !pair.right) {
+      const presentKind = (pair.left ?? pair.right)!.kind;
+      if (presentKind === 'directory') {
+        const presentNode = pair.left
+          ? leftDirsByName.get(pair.name)!
+          : rightDirsByName.get(pair.name)!;
+        // An empty directory on only one side is equivalent to a
+        // non-existent directory on the other — ignored entirely rather
+        // than counted as a mismatch (doesn't affect allMatching, doesn't
+        // enter the checksum's child list either).
+        if (isEmptyDirectorySubtree(presentNode, comparisonRepository)) {
+          continue;
+        }
+      }
+      allMatching = false;
+      continue;
+    }
+
+    if (pair.left.kind !== pair.right.kind) {
       allMatching = false;
       continue;
     }

@@ -7,6 +7,7 @@ import {
   type PairableEntry,
 } from '@/domain/directory-comparison/entry-comparison-result';
 import { getName, isWithinSubtree } from '@/domain/scanning/path-info';
+import { isEmptyDirectorySubtree } from './is-empty-directory-subtree';
 
 export type PassActive = 'structural' | 'comparison' | null;
 
@@ -122,9 +123,25 @@ export async function getComparisonView(
     const kind = (pair.left ?? pair.right)!.kind;
 
     if (!pair.left) {
+      const rightNode = rightDirsByName.get(pair.name);
+      if (
+        kind === 'directory' &&
+        rightNode &&
+        isEmptyDirectorySubtree(rightNode, comparisonRepository)
+      ) {
+        return { name: pair.name, kind, status: 'matching_empty' };
+      }
       return { name: pair.name, kind, status: 'only_right' };
     }
     if (!pair.right) {
+      const leftNode = leftDirsByName.get(pair.name);
+      if (
+        kind === 'directory' &&
+        leftNode &&
+        isEmptyDirectorySubtree(leftNode, comparisonRepository)
+      ) {
+        return { name: pair.name, kind, status: 'matching_empty' };
+      }
       return { name: pair.name, kind, status: 'only_left' };
     }
     if (pair.left.kind !== pair.right.kind) {
