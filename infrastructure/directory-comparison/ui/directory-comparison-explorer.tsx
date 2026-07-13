@@ -11,11 +11,18 @@ import {
 } from './use-comparison-status';
 import { getParentPath, isWithinSubtree } from '@/domain/scanning/path-info';
 import type { EntryComparisonStatus } from '@/domain/directory-comparison/entry-comparison-result';
+import type { SizeInfo } from '@/application/directory-comparison/size-info-port';
 import {
   loadPanes,
   savePanes,
   type PanesState,
 } from '@/infrastructure/directory-comparison/panes-storage';
+import {
+  COMPARISON_STATUS_COLORS,
+  COMPARISON_STATUS_LABELS,
+} from './comparison-status-colors';
+import { humanizeSize, exactBytesLabel } from './format-size';
+import { cn } from '@/lib/utils';
 
 function childPath(currentPath: string, name: string): string {
   return currentPath === '/' ? `/${name}` : `${currentPath}/${name}`;
@@ -47,6 +54,49 @@ function activePathForSide(
     activePath.pass === 'structural' ? activePath.path : activePath[side];
   if (!isWithinSubtree(candidate, root)) return null;
   return toRelative(candidate, root);
+}
+
+/** Shown at the right of a pane's header, next to its path — the same
+ * file-count/size/status info `ComparisonPane` shows for each child entry,
+ * but for the path itself (spec: user request). `undefined` while the
+ * status poll hasn't returned yet; `null` fields mean "no data" (Count and
+ * Size never scanned this path, or no Compare has reached it), same as any
+ * other entry. */
+function PaneOwnInfo({
+  sizeInfo,
+  status,
+}: {
+  sizeInfo: SizeInfo | null | undefined;
+  status: EntryComparisonStatus | null | undefined;
+}) {
+  return (
+    <span className="ml-auto flex shrink-0 items-center gap-2 text-xs text-muted-foreground">
+      {sizeInfo && (
+        <span title={exactBytesLabel(sizeInfo.totalSize)}>
+          {sizeInfo.fileCount.toLocaleString()} files,{' '}
+          {humanizeSize(sizeInfo.totalSize)}
+          {sizeInfo.incomplete && (
+            <span
+              className="text-amber-600 dark:text-amber-500"
+              title="Count and Size's own scan of this directory hasn't fully completed — this total may be partial"
+            >
+              {' '}
+              (partial)
+            </span>
+          )}
+        </span>
+      )}
+      {status && (
+        <span
+          className={cn(
+            'inline-block size-2.5 shrink-0 rounded-full',
+            COMPARISON_STATUS_COLORS[status],
+          )}
+          title={COMPARISON_STATUS_LABELS[status]}
+        />
+      )}
+    </span>
+  );
 }
 
 /**
@@ -207,9 +257,13 @@ export function DirectoryComparisonExplorer() {
             >
               <FolderUp className="size-4" aria-hidden="true" />
             </Button>
-            <p className="truncate font-mono text-sm text-muted-foreground">
+            <p className="min-w-0 flex-1 truncate font-mono text-sm text-muted-foreground">
               {leftPath}
             </p>
+            <PaneOwnInfo
+              sizeInfo={view?.leftSizeInfo}
+              status={view?.ownStatus}
+            />
           </div>
           <div className="flex-1 overflow-y-auto">
             <ComparisonPane
@@ -245,9 +299,13 @@ export function DirectoryComparisonExplorer() {
             >
               <FolderUp className="size-4" aria-hidden="true" />
             </Button>
-            <p className="truncate font-mono text-sm text-muted-foreground">
+            <p className="min-w-0 flex-1 truncate font-mono text-sm text-muted-foreground">
               {rightPath}
             </p>
+            <PaneOwnInfo
+              sizeInfo={view?.rightSizeInfo}
+              status={view?.ownStatus}
+            />
           </div>
           <div className="flex-1 overflow-y-auto">
             <ComparisonPane

@@ -62,6 +62,10 @@ export interface ComparisonRepositoryPort {
 
   // Shared by Pass 1 and Pass 2, and by read-time comparison-view derivation.
   getSubtree(path: string): DirectoryComparisonNode[]; // self + descendants, self first
+  // Cheap single-row lookup — used where only this exact path's own node is
+  // needed (e.g. a pane's own header status), unlike getSubtree's full
+  // recursive walk. `null` iff Pass 1 has never listed this exact path.
+  getNode(path: string): DirectoryComparisonNode | null;
   getDirectChildren(path: string): {
     directories: DirectoryComparisonNode[];
     files: FileChecksumEntry[];

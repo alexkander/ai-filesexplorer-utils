@@ -5,6 +5,7 @@ import { comparisonRepositoryAdapter } from '@/infrastructure/directory-comparis
 import { structuralScanWorker } from '@/infrastructure/directory-comparison/structural-scan-worker';
 import { comparisonPassWorker } from '@/infrastructure/directory-comparison/comparison-pass-worker';
 import { comparisonQueue } from '@/infrastructure/directory-comparison/comparison-queue';
+import { countAndSizeReadonlyAdapter } from '@/infrastructure/directory-comparison/count-and-size-readonly-adapter';
 
 export async function GET(request: NextRequest) {
   const left = request.nextUrl.searchParams.get('left');
@@ -21,6 +22,7 @@ export async function GET(request: NextRequest) {
     structuralScanWorker.getActivePath(),
     comparisonPassWorker.getActivePath(),
     comparisonQueue.getActivePair(),
+    countAndSizeReadonlyAdapter,
   );
   return NextResponse.json(view);
 }

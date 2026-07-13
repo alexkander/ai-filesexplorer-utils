@@ -111,6 +111,10 @@ const getSubtreeStmt = db.prepare(`
   SELECT n.* FROM directory_comparison_nodes n JOIN subtree s ON n.path = s.path
 `);
 
+const getNodeStmt = db.prepare(
+  `SELECT * FROM directory_comparison_nodes WHERE path = ?`,
+);
+
 const getChildDirsStmt = db.prepare(
   `SELECT * FROM directory_comparison_nodes WHERE parent_path = ?`,
 );
@@ -248,6 +252,11 @@ export const comparisonRepositoryAdapter: ComparisonRepositoryPort = {
     if (!self) return [];
     const rest = rows.filter((r) => r.path !== targetPath);
     return [toNode(self), ...rest.map(toNode)];
+  },
+
+  getNode(path) {
+    const row = getNodeStmt.get(path) as DirRow | undefined;
+    return row ? toNode(row) : null;
   },
 
   getDirectChildren(path) {

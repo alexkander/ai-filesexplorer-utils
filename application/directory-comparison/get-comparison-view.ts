@@ -1,5 +1,9 @@
-import type { ComparisonRepositoryPort } from './comparison-repository-port';
+import type {
+  ComparisonRepositoryPort,
+  DirectoryComparisonNode,
+} from './comparison-repository-port';
 import type { FileSystemPort } from '@/application/scanning/filesystem-port';
+import type { SizeInfo, SizeInfoPort } from './size-info-port';
 import {
   pairEntriesByName,
   type EntryComparisonResult,
@@ -10,6 +14,46 @@ import { getName, isWithinSubtree } from '@/domain/scanning/path-info';
 import { isEmptyDirectorySubtree } from './is-empty-directory-subtree';
 
 export type PassActive = 'structural' | 'comparison' | null;
+
+// Shared by each child pair (in the loop below) and by ownStatus (for
+// leftPath/rightPath themselves) — everything EXCEPT the "scanning" case,
+// since what counts as "active" differs by scope (a specific child path vs.
+// leftPath/rightPath's whole subtree) and is checked separately by callers.
+function deriveDirectoryNodeStatus(
+  leftNode: DirectoryComparisonNode,
+  rightNode: DirectoryComparisonNode,
+): EntryComparisonStatus {
+  if (
+    leftNode.hasUnreadableEntries ||
+    rightNode.hasUnreadableEntries ||
+    leftNode.ownOutcome === 'error' ||
+    rightNode.ownOutcome === 'error'
+  ) {
+    return 'error';
+  }
+  // 'stopped' (interrupted by Stop or an app restart, FR-014) is folded
+  // into 'not_compared' rather than getting its own status — FR-007 only
+  // defines 6 statuses, none of which is "Stopped", so this is a
+  // deliberate simplification: pressing "Compare" again reprocesses it
+  // exactly as if it had never been compared (data-model.md).
+  if (leftNode.ownOutcome !== 'done' || rightNode.ownOutcome !== 'done') {
+    return 'not_compared';
+  }
+  // `directoryChecksum === null` alone does NOT mean "confirmed differs" —
+  // it's also the value for a pair Pass 2 has never actually reached (not
+  // yet gotten here in a still-running compare, or interrupted by Stop
+  // before concluding anything). `resolvedByPass2` is the actual signal
+  // for "Pass 2 concluded something here at least once" (found missing
+  // post-implementation — this used to show a false `differs` for entries
+  // that had never really been compared).
+  if (!leftNode.resolvedByPass2 || !rightNode.resolvedByPass2) {
+    return 'not_compared';
+  }
+  return leftNode.directoryChecksum !== null &&
+    leftNode.directoryChecksum === rightNode.directoryChecksum
+    ? 'matching'
+    : 'differs';
+}
 
 export interface ComparisonView {
   passActive: PassActive;
@@ -30,6 +74,18 @@ export interface ComparisonView {
    * (research.md Decision 16). `null` exactly when `activePath` is `null`. */
   activePair: { leftRoot: string; rightRoot: string } | null;
   entries: EntryComparisonResult[];
+  /** `leftPath`/`rightPath` themselves, as if each were an entry of its own
+   * parent — same statuses a child entry can have, minus `only_left`/
+   * `only_right`/`matching_empty` (both paths are given directly, not
+   * discovered by listing a shared parent). `null` iff Pass 1 has never
+   * listed that exact path (no Compare has reached it yet). */
+  ownStatus: EntryComparisonStatus | null;
+  /** Count and Size's read-only overlay for `leftPath`/`rightPath`
+   * themselves (same source `ListedEntry.sizeInfo` uses for each child in
+   * `ComparisonPane`) — `null` iff Count and Size has never scanned that
+   * exact path. */
+  leftSizeInfo: SizeInfo | null;
+  rightSizeInfo: SizeInfo | null;
 }
 
 /**
@@ -53,6 +109,7 @@ export async function getComparisonView(
   structuralActivePath: string | null,
   comparisonActivePath: { left: string; right: string } | null,
   activePair: { leftRoot: string; rightRoot: string } | null,
+  sizeInfoPort: SizeInfoPort,
 ): Promise<ComparisonView> {
   const [leftListing, rightListing] = await Promise.all([
     fileSystem.listChildren(leftPath),
@@ -101,6 +158,18 @@ export async function getComparisonView(
     : comparisonActive
       ? 'comparison'
       : null;
+
+  const ownLeftNode = comparisonRepository.getNode(leftPath);
+  const ownRightNode = comparisonRepository.getNode(rightPath);
+  const ownStatus: EntryComparisonStatus | null =
+    passActive !== null
+      ? 'scanning'
+      : ownLeftNode && ownRightNode
+        ? deriveDirectoryNodeStatus(ownLeftNode, ownRightNode)
+        : null;
+
+  const leftSizeInfo = sizeInfoPort.getSizeInfo(leftPath);
+  const rightSizeInfo = sizeInfoPort.getSizeInfo(rightPath);
 
   // Deliberately NOT scoped to leftPath/rightPath, unlike passActive above —
   // only one comparison runs at a time in this tool (FR-010), so this always
@@ -166,38 +235,11 @@ export async function getComparisonView(
       ) {
         return { name: pair.name, kind, status: 'scanning' };
       }
-      if (
-        leftNode.hasUnreadableEntries ||
-        rightNode.hasUnreadableEntries ||
-        leftNode.ownOutcome === 'error' ||
-        rightNode.ownOutcome === 'error'
-      ) {
-        return { name: pair.name, kind, status: 'error' };
-      }
-      // 'stopped' (interrupted by Stop or an app restart, FR-014) is folded
-      // into 'not_compared' rather than getting its own status — FR-007
-      // only defines 6 statuses, none of which is "Stopped", so this is a
-      // deliberate simplification: pressing "Compare" again reprocesses it
-      // exactly as if it had never been compared (data-model.md).
-      if (leftNode.ownOutcome !== 'done' || rightNode.ownOutcome !== 'done') {
-        return { name: pair.name, kind, status: 'not_compared' };
-      }
-      // `directoryChecksum === null` alone does NOT mean "confirmed
-      // differs" — it's also the value for a pair Pass 2 has never actually
-      // reached (not yet gotten here in a still-running compare, or
-      // interrupted by Stop before concluding anything). `resolvedByPass2`
-      // is the actual signal for "Pass 2 concluded something here at least
-      // once" (found missing post-implementation — this used to show a
-      // false `differs` for entries that had never really been compared).
-      if (!leftNode.resolvedByPass2 || !rightNode.resolvedByPass2) {
-        return { name: pair.name, kind, status: 'not_compared' };
-      }
-      const status: EntryComparisonStatus =
-        leftNode.directoryChecksum !== null &&
-        leftNode.directoryChecksum === rightNode.directoryChecksum
-          ? 'matching'
-          : 'differs';
-      return { name: pair.name, kind, status };
+      return {
+        name: pair.name,
+        kind,
+        status: deriveDirectoryNodeStatus(leftNode, rightNode),
+      };
     }
 
     const leftFile = leftFilesByName.get(pair.name);
@@ -248,5 +290,8 @@ export async function getComparisonView(
     activePath,
     activePair: activePath !== null ? activePair : null,
     entries,
+    ownStatus,
+    leftSizeInfo,
+    rightSizeInfo,
   };
 }
