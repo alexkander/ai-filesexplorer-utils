@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  echo "Usage: ./compose <dev|prod> <up|down|logs|restart> [OPTIONS]" >&2
+  exit 1
+}
+
+target="${1:-}"
+action="${2:-}"
+
+[[ -n "$target" && -n "$action" ]] || usage
+shift 2
+
+case "$target" in
+  dev)
+    compose_files=(-f docker-compose.yml)
+    ;;
+  prod)
+    compose_files=(-f docker-compose.prod.yml)
+    ;;
+  *)
+    usage
+    ;;
+esac
+
+case "$action" in
+  up)
+    docker compose "${compose_files[@]}" up -d --build "$@"
+    ;;
+  down)
+    docker compose "${compose_files[@]}" down -v "$@"
+    ;;
+  logs)
+    docker compose "${compose_files[@]}" logs -f "$@"
+    ;;
+  restart)
+    docker compose "${compose_files[@]}" restart "$@"
+    ;;
+  *)
+    usage
+    ;;
+esac
