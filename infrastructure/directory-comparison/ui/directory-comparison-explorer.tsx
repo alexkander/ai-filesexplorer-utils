@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { FolderUp } from 'lucide-react';
 import { Button } from '@/infrastructure/ui/components/button';
+import { CopyablePath } from '@/infrastructure/ui/components/copyable-path';
 import { ComparisonPane } from './comparison-pane';
 import { ComparisonStatusPanel } from './comparison-status-panel';
 import {
@@ -12,6 +13,10 @@ import {
 import { getParentPath, isWithinSubtree } from '@/domain/scanning/path-info';
 import type { EntryComparisonStatus } from '@/domain/directory-comparison/entry-comparison-result';
 import type { SizeInfo } from '@/application/directory-comparison/size-info-port';
+import type {
+  SortBy,
+  SortDir,
+} from '@/application/directory-comparison/list-directory';
 import {
   loadPanes,
   savePanes,
@@ -23,6 +28,13 @@ import {
 } from './comparison-status-colors';
 import { humanizeSize, exactBytesLabel } from './format-size';
 import { cn } from '@/lib/utils';
+
+const SORT_OPTIONS: { value: SortBy; label: string }[] = [
+  { value: 'name', label: 'Name' },
+  { value: 'type', label: 'Type' },
+  { value: 'size', label: 'Size' },
+  { value: 'count', label: 'Files' },
+];
 
 function childPath(currentPath: string, name: string): string {
   return currentPath === '/' ? `/${name}` : `${currentPath}/${name}`;
@@ -117,6 +129,9 @@ export function DirectoryComparisonExplorer() {
   const [leftPath, setLeftPath] = useState('/');
   const [rightPath, setRightPath] = useState('/');
   const [moveSync, setMoveSync] = useState(false);
+  const [sortBy, setSortBy] = useState<SortBy>('name');
+  const [sortDir, setSortDir] = useState<SortDir>('asc');
+  const [hideMatching, setHideMatching] = useState(false);
   const [hydrated, setHydrated] = useState(false);
 
   useEffect(() => {
@@ -125,14 +140,33 @@ export function DirectoryComparisonExplorer() {
     setLeftPath(state.leftPath);
     setRightPath(state.rightPath);
     setMoveSync(state.moveSync);
+    setSortBy(state.sortBy);
+    setSortDir(state.sortDir);
+    setHideMatching(state.hideMatching);
     setHydrated(true);
   }, []);
 
   useEffect(() => {
     if (!hydrated) return;
-    const state: PanesState = { leftPath, rightPath, moveSync };
+    const state: PanesState = {
+      leftPath,
+      rightPath,
+      moveSync,
+      sortBy,
+      sortDir,
+      hideMatching,
+    };
     savePanes(state);
-  }, [leftPath, rightPath, moveSync, hydrated]);
+  }, [leftPath, rightPath, moveSync, sortBy, sortDir, hideMatching, hydrated]);
+
+  const handleSortClick = (field: SortBy) => {
+    if (field === sortBy) {
+      setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortBy(field);
+      setSortDir('asc');
+    }
+  };
 
   const { view, starting, compare, stop, refetch } = useComparisonStatus(
     leftPath,
@@ -241,14 +275,42 @@ export function DirectoryComparisonExplorer() {
     // own content and stops partway down the page.
     <div className="flex h-full flex-col">
       <div className="sticky top-0 z-10 flex flex-wrap items-center justify-between gap-3 border-b bg-background p-4">
-        <label className="flex items-center gap-2 text-sm">
-          <input
-            type="checkbox"
-            checked={moveSync}
-            onChange={(e) => setMoveSync(e.target.checked)}
-          />
-          Move sync
-        </label>
+        <div className="flex flex-wrap items-center gap-3">
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={moveSync}
+              onChange={(e) => setMoveSync(e.target.checked)}
+            />
+            Move sync
+          </label>
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={hideMatching}
+              onChange={(e) => setHideMatching(e.target.checked)}
+            />
+            Hide matching
+          </label>
+          <div className="flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
+            <span>Sort by:</span>
+            {SORT_OPTIONS.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                onClick={() => handleSortClick(option.value)}
+                className={cn(
+                  'rounded px-2 py-1 hover:bg-accent',
+                  sortBy === option.value &&
+                    'bg-accent font-medium text-foreground',
+                )}
+              >
+                {option.label}
+                {sortBy === option.value && (sortDir === 'asc' ? ' ↑' : ' ↓')}
+              </button>
+            ))}
+          </div>
+        </div>
         <ComparisonStatusPanel
           view={view}
           starting={starting}
@@ -270,9 +332,10 @@ export function DirectoryComparisonExplorer() {
             >
               <FolderUp className="size-4" aria-hidden="true" />
             </Button>
-            <p className="min-w-0 flex-1 truncate font-mono text-sm text-muted-foreground">
-              {leftPath}
-            </p>
+            <CopyablePath
+              path={leftPath}
+              className="min-w-0 flex-1 truncate text-sm text-muted-foreground"
+            />
             <PaneOwnInfo
               sizeInfo={view?.leftSizeInfo}
               checksum={view?.ownChecksum}
@@ -288,6 +351,9 @@ export function DirectoryComparisonExplorer() {
               checksumByName={leftChecksumByName}
               refreshToken={leftRefreshToken}
               onCopyToOtherSide={(name) => copyToOtherSide('left', name)}
+              sortBy={sortBy}
+              sortDir={sortDir}
+              hideMatching={hideMatching}
             />
           </div>
           {/* Pinned below the scrollable listing (not sticky inside it) —
@@ -314,9 +380,10 @@ export function DirectoryComparisonExplorer() {
             >
               <FolderUp className="size-4" aria-hidden="true" />
             </Button>
-            <p className="min-w-0 flex-1 truncate font-mono text-sm text-muted-foreground">
-              {rightPath}
-            </p>
+            <CopyablePath
+              path={rightPath}
+              className="min-w-0 flex-1 truncate text-sm text-muted-foreground"
+            />
             <PaneOwnInfo
               sizeInfo={view?.rightSizeInfo}
               checksum={view?.ownChecksum}
@@ -332,6 +399,9 @@ export function DirectoryComparisonExplorer() {
               checksumByName={rightChecksumByName}
               refreshToken={rightRefreshToken}
               onCopyToOtherSide={(name) => copyToOtherSide('right', name)}
+              sortBy={sortBy}
+              sortDir={sortDir}
+              hideMatching={hideMatching}
             />
           </div>
           {rightActivePath && (

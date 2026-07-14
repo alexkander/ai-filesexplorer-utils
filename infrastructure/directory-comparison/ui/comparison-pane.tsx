@@ -7,6 +7,8 @@ import { cn } from '@/lib/utils';
 import type {
   ListedEntry,
   ListDirectoryResult,
+  SortBy,
+  SortDir,
 } from '@/application/directory-comparison/list-directory';
 import type { EntryComparisonStatus } from '@/domain/directory-comparison/entry-comparison-result';
 import {
@@ -26,9 +28,11 @@ async function fetchPage(
   path: string,
   offset: number,
   limit: number,
+  sortBy: SortBy,
+  sortDir: SortDir,
 ): Promise<FetchResult> {
   const res = await fetch(
-    `/api/directory-comparison/list?path=${encodeURIComponent(path)}&offset=${offset}&limit=${limit}`,
+    `/api/directory-comparison/list?path=${encodeURIComponent(path)}&offset=${offset}&limit=${limit}&sortBy=${sortBy}&sortDir=${sortDir}`,
   );
   if (res.status === 404) return { status: 'not_found' };
   if (!res.ok) return { status: 'error' };
@@ -40,6 +44,11 @@ const ONLY_ON_THIS_SIDE: Record<'left' | 'right', EntryComparisonStatus> = {
   right: 'only_right',
 };
 
+const MATCHING_STATUSES: ReadonlySet<EntryComparisonStatus> = new Set([
+  'matching',
+  'matching_empty',
+]);
+
 export function ComparisonPane({
   path,
   side,
@@ -48,6 +57,9 @@ export function ComparisonPane({
   checksumByName,
   refreshToken,
   onCopyToOtherSide,
+  sortBy,
+  sortDir,
+  hideMatching,
 }: {
   path: string;
   /** Which pane this is — determines which "only on this side" status
@@ -76,6 +88,14 @@ export function ComparisonPane({
    * parent owns the confirmation prompt, the actual copy request, and
    * bumping the destination pane's `refreshToken` afterward. */
   onCopyToOtherSide?: (name: string) => Promise<void>;
+  /** Shared by both panes — set by the parent's single sort control. */
+  sortBy: SortBy;
+  sortDir: SortDir;
+  /** Shared by both panes — hides entries whose comparison status is
+   * `matching`/`matching_empty` (spec/user request), so a mostly-identical
+   * pair only shows what actually needs attention. Purely a display filter
+   * over the already-loaded page — doesn't affect `hasMore`/pagination. */
+  hideMatching?: boolean;
 }) {
   const [entries, setEntries] = useState<ListedEntry[]>([]);
   const [hasMore, setHasMore] = useState(false);
@@ -86,7 +106,7 @@ export function ComparisonPane({
 
   useEffect(() => {
     let ignore = false;
-    fetchPage(path, 0, PAGE_SIZE).then((result) => {
+    fetchPage(path, 0, PAGE_SIZE, sortBy, sortDir).then((result) => {
       if (ignore) return;
       setNotFound(false);
       setError(false);
@@ -108,7 +128,7 @@ export function ComparisonPane({
     return () => {
       ignore = true;
     };
-  }, [path, refreshToken]);
+  }, [path, refreshToken, sortBy, sortDir]);
 
   const handleCopy = async (name: string) => {
     if (!onCopyToOtherSide) return;
@@ -123,7 +143,13 @@ export function ComparisonPane({
   const loadMore = async () => {
     setLoading(true);
     try {
-      const result = await fetchPage(path, entries.length, PAGE_SIZE);
+      const result = await fetchPage(
+        path,
+        entries.length,
+        PAGE_SIZE,
+        sortBy,
+        sortDir,
+      );
       if (result.status !== 'ok') {
         setError(true);
         return;
@@ -151,10 +177,17 @@ export function ComparisonPane({
     );
   }
 
+  const visibleEntries = hideMatching
+    ? entries.filter((entry) => {
+        const status = statusByName?.get(entry.name);
+        return !status || !MATCHING_STATUSES.has(status);
+      })
+    : entries;
+
   return (
     <div className="flex flex-col gap-2 p-2">
       <ul className="flex flex-col divide-y">
-        {entries.map((entry) => {
+        {visibleEntries.map((entry) => {
           const status = statusByName?.get(entry.name);
           const checksum = checksumByName?.get(entry.name);
           return (
@@ -252,6 +285,11 @@ export function ComparisonPane({
       </ul>
       {entries.length === 0 && !loading && (
         <p className="text-sm text-muted-foreground">Empty directory.</p>
+      )}
+      {entries.length > 0 && visibleEntries.length === 0 && !loading && (
+        <p className="text-sm text-muted-foreground italic">
+          Everything here matches — hidden by &quot;Hide matching&quot;.
+        </p>
       )}
       {hasMore && (
         <Button

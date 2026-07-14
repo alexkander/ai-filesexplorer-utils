@@ -1,9 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { listDirectory } from '@/application/directory-comparison/list-directory';
+import {
+  listDirectory,
+  type SortBy,
+  type SortDir,
+} from '@/application/directory-comparison/list-directory';
 import { filesystemAdapter } from '@/infrastructure/scanning/filesystem-adapter';
 import { countAndSizeReadonlyAdapter } from '@/infrastructure/directory-comparison/count-and-size-readonly-adapter';
 
 const DEFAULT_LIMIT = 200;
+const SORT_BY_VALUES: SortBy[] = ['name', 'type', 'size', 'count'];
 
 export async function GET(request: NextRequest) {
   const path = request.nextUrl.searchParams.get('path');
@@ -15,11 +20,19 @@ export async function GET(request: NextRequest) {
   const limit = Number(
     request.nextUrl.searchParams.get('limit') ?? DEFAULT_LIMIT,
   );
+  const sortByParam = request.nextUrl.searchParams.get('sortBy');
+  const sortBy: SortBy = SORT_BY_VALUES.includes(sortByParam as SortBy)
+    ? (sortByParam as SortBy)
+    : 'name';
+  const sortDir: SortDir =
+    request.nextUrl.searchParams.get('sortDir') === 'desc' ? 'desc' : 'asc';
 
   const outcome = await listDirectory(
     path,
     offset,
     limit,
+    sortBy,
+    sortDir,
     filesystemAdapter,
     countAndSizeReadonlyAdapter,
   );

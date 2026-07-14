@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { FolderUp } from 'lucide-react';
 import { Button } from '@/infrastructure/ui/components/button';
+import { CopyablePath } from '@/infrastructure/ui/components/copyable-path';
 import { DirectoryBrowser } from './directory-browser';
 import { ScanStatusPanel } from './scan-status-panel';
 import { useDirectoryStatus } from './use-directory-status';
@@ -51,9 +52,10 @@ export function CountAndSizeExplorer() {
           >
             <FolderUp className="size-4" aria-hidden="true" />
           </Button>
-          <p className="font-mono text-sm text-muted-foreground">
-            {currentPath}
-          </p>
+          <CopyablePath
+            path={currentPath}
+            className="text-sm text-muted-foreground"
+          />
         </div>
         <ScanStatusPanel
           view={view}
