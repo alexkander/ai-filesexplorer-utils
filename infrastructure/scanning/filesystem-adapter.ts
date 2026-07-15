@@ -2,6 +2,7 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import type {
   FileSystemPort,
+  ListChildrenNamesOutcome,
   ListChildrenOutcome,
   RawEntry,
 } from '@/application/scanning/filesystem-port';
@@ -66,6 +67,28 @@ export const filesystemAdapter: FileSystemPort = {
     const entries = await Promise.all(
       dirents.map((dirent) => toRawEntry(dirPath, dirent)),
     );
+
+    return { ok: true, result: { entries } };
+  },
+
+  async listChildrenNames(dirPath: string): Promise<ListChildrenNamesOutcome> {
+    let dirents;
+    try {
+      dirents = await fs.readdir(dirPath, { withFileTypes: true });
+    } catch (error) {
+      if (isNotFoundError(error)) return { ok: false, reason: 'not_found' };
+      if (isUnreadableError(error)) return { ok: false, reason: 'unreadable' };
+      throw error;
+    }
+
+    const entries = dirents.map((dirent) => ({
+      name: dirent.name,
+      kind: dirent.isSymbolicLink()
+        ? ('symlink' as const)
+        : dirent.isDirectory()
+          ? ('directory' as const)
+          : ('file' as const),
+    }));
 
     return { ok: true, result: { entries } };
   },

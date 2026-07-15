@@ -116,9 +116,14 @@ export async function getComparisonView(
   activePair: { leftRoot: string; rightRoot: string } | null,
   sizeInfoPort: SizeInfoPort,
 ): Promise<ComparisonView> {
+  // listChildrenNames, not listChildren — only name/kind are used below (to
+  // pair entries by name), and listChildren's per-file stat() call for
+  // size/mtime would be pure waste here — on a directory with thousands of
+  // files (especially over a network filesystem) that turns one status
+  // poll into tens of seconds for data nothing here reads.
   const [leftListing, rightListing] = await Promise.all([
-    fileSystem.listChildren(leftPath),
-    fileSystem.listChildren(rightPath),
+    fileSystem.listChildrenNames(leftPath),
+    fileSystem.listChildrenNames(rightPath),
   ]);
 
   const leftEntries: PairableEntry[] = leftListing.ok

@@ -248,6 +248,42 @@ export function DirectoryComparisonExplorer() {
     await refetch();
   };
 
+  // Same "only on this side" condition as copyToOtherSide, offered as the
+  // alternative resolution: instead of copying the missing side in, delete
+  // the extra one. Moves it to this tool's own trash folder rather than
+  // removing it outright (spec: user request; the original spec deferred
+  // any delete action entirely) — see delete-adapter.ts.
+  const deleteFromThisSide = async (side: 'left' | 'right', name: string) => {
+    const parent = side === 'left' ? leftPath : rightPath;
+    const targetPath = childPath(parent, name);
+
+    if (
+      !window.confirm(
+        `Move "${targetPath}" to trash?\n\nIt will be moved into this tool's .ai-filesexplorer-utils-trash/ folder, not deleted outright — recoverable by hand if needed.`,
+      )
+    ) {
+      return;
+    }
+
+    const res = await fetch('/api/directory-comparison/delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: targetPath }),
+    });
+
+    if (!res.ok) {
+      const body = (await res.json().catch(() => null)) as {
+        error?: string;
+      } | null;
+      window.alert(`Delete failed: ${body?.error ?? res.statusText}`);
+      return;
+    }
+
+    if (side === 'left') setLeftRefreshToken((t) => t + 1);
+    else setRightRefreshToken((t) => t + 1);
+    await refetch();
+  };
+
   const navigateUp = (pane: 'left' | 'right') => {
     if (pane === 'left') {
       const parent = getParentPath(leftPath);
@@ -351,6 +387,7 @@ export function DirectoryComparisonExplorer() {
               checksumByName={leftChecksumByName}
               refreshToken={leftRefreshToken}
               onCopyToOtherSide={(name) => copyToOtherSide('left', name)}
+              onDeleteFromThisSide={(name) => deleteFromThisSide('left', name)}
               sortBy={sortBy}
               sortDir={sortDir}
               hideMatching={hideMatching}
@@ -399,6 +436,7 @@ export function DirectoryComparisonExplorer() {
               checksumByName={rightChecksumByName}
               refreshToken={rightRefreshToken}
               onCopyToOtherSide={(name) => copyToOtherSide('right', name)}
+              onDeleteFromThisSide={(name) => deleteFromThisSide('right', name)}
               sortBy={sortBy}
               sortDir={sortDir}
               hideMatching={hideMatching}
