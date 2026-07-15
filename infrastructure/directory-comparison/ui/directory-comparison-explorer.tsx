@@ -284,6 +284,49 @@ export function DirectoryComparisonExplorer() {
     await refetch();
   };
 
+  // Drag-and-drop rename (spec: user request): dragging a file from one
+  // pane onto a file on the OTHER pane renames the drop target to the
+  // dragged file's name — e.g. drag "my-file.txt" onto "wrong-name.txt" and
+  // "wrong-name.txt" becomes "my-file.txt". Only the drop target's name
+  // changes; the dragged file (on the other side) is never touched. `side`
+  // here is the DROP TARGET's side, not the dragged file's — ComparisonPane
+  // already enforces cross-side-only and file-only before calling this.
+  const renameViaDrop = async (
+    side: 'left' | 'right',
+    droppedOnName: string,
+    draggedName: string,
+  ) => {
+    const parent = side === 'left' ? leftPath : rightPath;
+    const sourcePath = childPath(parent, droppedOnName);
+    const destinationPath = childPath(parent, draggedName);
+
+    if (
+      !window.confirm(
+        `Rename "${sourcePath}" to "${draggedName}"?\n\nOnly the name changes here — its content stays exactly as-is, and nothing is copied or moved from the other side.`,
+      )
+    ) {
+      return;
+    }
+
+    const res = await fetch('/api/directory-comparison/rename', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sourcePath, destinationPath }),
+    });
+
+    if (!res.ok) {
+      const body = (await res.json().catch(() => null)) as {
+        error?: string;
+      } | null;
+      window.alert(`Rename failed: ${body?.error ?? res.statusText}`);
+      return;
+    }
+
+    if (side === 'left') setLeftRefreshToken((t) => t + 1);
+    else setRightRefreshToken((t) => t + 1);
+    await refetch();
+  };
+
   const navigateUp = (pane: 'left' | 'right') => {
     if (pane === 'left') {
       const parent = getParentPath(leftPath);
@@ -388,6 +431,9 @@ export function DirectoryComparisonExplorer() {
               refreshToken={leftRefreshToken}
               onCopyToOtherSide={(name) => copyToOtherSide('left', name)}
               onDeleteFromThisSide={(name) => deleteFromThisSide('left', name)}
+              onRenameDrop={(droppedOnName, draggedName) =>
+                renameViaDrop('left', droppedOnName, draggedName)
+              }
               sortBy={sortBy}
               sortDir={sortDir}
               hideMatching={hideMatching}
@@ -437,6 +483,9 @@ export function DirectoryComparisonExplorer() {
               refreshToken={rightRefreshToken}
               onCopyToOtherSide={(name) => copyToOtherSide('right', name)}
               onDeleteFromThisSide={(name) => deleteFromThisSide('right', name)}
+              onRenameDrop={(droppedOnName, draggedName) =>
+                renameViaDrop('right', droppedOnName, draggedName)
+              }
               sortBy={sortBy}
               sortDir={sortDir}
               hideMatching={hideMatching}

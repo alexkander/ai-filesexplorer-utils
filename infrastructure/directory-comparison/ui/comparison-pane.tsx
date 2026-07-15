@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type DragEvent } from 'react';
 import { Copy, File, Folder, Loader2, Trash2 } from 'lucide-react';
 import { Button } from '@/infrastructure/ui/components/button';
 import { cn } from '@/lib/utils';
@@ -49,22 +49,48 @@ const MATCHING_STATUSES: ReadonlySet<EntryComparisonStatus> = new Set([
   'matching_empty',
 ]);
 
+// Drag-and-drop rename (spec: user request): drag a file from one pane onto
+// a file on the other pane to rename the drop target to the dragged file's
+// name. One MIME type per SOURCE side (rather than a single type with the
+// side inside a JSON payload) so `onDragOver` can tell a same-side drag
+// from a cross-side one just from `dataTransfer.types` — browsers withhold
+// `getData` until the actual `drop` for security, so encoding the side in
+// the type itself is the only way to gate hover feedback (and the
+// `preventDefault` that allows a drop at all) to valid cross-side drags.
+function otherSide(side: 'left' | 'right'): 'left' | 'right' {
+  return side === 'left' ? 'right' : 'left';
+}
+function dragMimeType(sourceSide: 'left' | 'right'): string {
+  return `application/x-directory-comparison-entry-${sourceSide}`;
+}
+
 // Safety cap on how many pages a single "load more" (or the initial load)
 // will auto-continue through while every fetched page is fully hidden by
 // "Hide matching" — without this, a pair of near-identical multi-thousand-
 // entry directories could turn one click into an unbounded fetch loop.
 const MAX_AUTO_PAGES = 50;
 
-function pageIsFullyHidden(
-  pageEntries: ListedEntry[],
-  hideMatching: boolean | undefined,
+function isEntryHidden(
+  entry: ListedEntry,
   statusByName: Map<string, EntryComparisonStatus> | undefined,
 ): boolean {
-  if (!hideMatching || pageEntries.length === 0) return false;
-  return pageEntries.every((entry) => {
-    const status = statusByName?.get(entry.name);
-    return !!status && MATCHING_STATUSES.has(status);
-  });
+  const status = statusByName?.get(entry.name);
+  return !!status && MATCHING_STATUSES.has(status);
+}
+
+// Count of entries in this page that "Hide matching" would NOT hide — used
+// to decide whether a fetch should keep auto-continuing to the next page.
+// Stopping as soon as a page has *any* visible entry (the original check)
+// undercounts badly: a page of 100 fetched entries with only 10 visible
+// would surface just those 10 and stop, instead of continuing to fill out
+// something closer to a full page's worth of entries actually worth
+// looking at.
+function countVisible(
+  pageEntries: ListedEntry[],
+  statusByName: Map<string, EntryComparisonStatus> | undefined,
+): number {
+  return pageEntries.filter((entry) => !isEntryHidden(entry, statusByName))
+    .length;
 }
 
 export function ComparisonPane({
@@ -76,6 +102,7 @@ export function ComparisonPane({
   refreshToken,
   onCopyToOtherSide,
   onDeleteFromThisSide,
+  onRenameDrop,
   sortBy,
   sortDir,
   hideMatching,
@@ -115,6 +142,15 @@ export function ComparisonPane({
    * confirmation prompt, the actual delete request, and re-fetching this
    * pane's own listing afterward. */
   onDeleteFromThisSide?: (name: string) => Promise<void>;
+  /** Called when a file dragged from the OTHER pane is dropped onto a file
+   * in THIS pane (spec: user request) — `droppedOnName` is this pane's
+   * entry the drop landed on, `draggedName` is the name to rename it to.
+   * Cross-side-only and file-only: enforced by this component before
+   * calling it (dragging within the same pane, dropping on a directory, or
+   * dropping a directory, all no-op). The parent owns the confirmation
+   * prompt, the actual rename request, and re-fetching this pane's own
+   * listing afterward. */
+  onRenameDrop?: (droppedOnName: string, draggedName: string) => Promise<void>;
   /** Shared by both panes — set by the parent's single sort control. */
   sortBy: SortBy;
   sortDir: SortDir;
@@ -122,9 +158,11 @@ export function ComparisonPane({
    * `matching`/`matching_empty` (spec/user request), so a mostly-identical
    * pair only shows what actually needs attention. Also drives pagination:
    * both the initial load and "Load more" keep auto-fetching subsequent
-   * pages (up to `MAX_AUTO_PAGES`) while every entry on the page fetched so
-   * far is hidden, so a click actually surfaces something instead of
-   * silently appending another fully-hidden page. */
+   * pages (up to `MAX_AUTO_PAGES`) until roughly a full page's worth of
+   * *visible* entries has been collected, not just until the raw fetched
+   * page happens to contain one — otherwise a page with only a handful of
+   * visible entries among hundreds hidden would surface just those few and
+   * stop. */
   hideMatching?: boolean;
 }) {
   const [entries, setEntries] = useState<ListedEntry[]>([]);
@@ -134,6 +172,7 @@ export function ComparisonPane({
   const [error, setError] = useState(false);
   const [copyingName, setCopyingName] = useState<string | null>(null);
   const [deletingName, setDeletingName] = useState<string | null>(null);
+  const [dragOverName, setDragOverName] = useState<string | null>(null);
 
   // hideMatching/statusByName deliberately are NOT effect dependencies below
   // — statusByName is a brand-new Map identity on every parent render (every
@@ -179,6 +218,11 @@ export function ComparisonPane({
       let offset = startOffset;
       let collected: ListedEntry[] = reset ? [] : entries;
       let pagesFetched = 0;
+      // Visible-entry count accumulated *within this call* (not counting
+      // whatever was already on screen before it) — the target is roughly
+      // one page's worth of entries actually worth looking at, not one raw
+      // page of the underlying listing.
+      let visibleAccumulated = 0;
       for (;;) {
         const result = await fetchPage(
           path,
@@ -206,15 +250,16 @@ export function ComparisonPane({
         setError(false);
         collected = [...collected, ...result.page.entries];
         pagesFetched += 1;
+        visibleAccumulated += countVisible(
+          result.page.entries,
+          statusByNameRef.current,
+        );
         setEntries(collected);
         setHasMore(result.page.hasMore);
 
         const keepGoing =
-          pageIsFullyHidden(
-            result.page.entries,
-            hideMatchingRef.current,
-            statusByNameRef.current,
-          ) &&
+          hideMatchingRef.current === true &&
+          visibleAccumulated < PAGE_SIZE &&
           result.page.hasMore &&
           pagesFetched < MAX_AUTO_PAGES;
         if (!keepGoing) return;
@@ -256,6 +301,52 @@ export function ComparisonPane({
     }
   };
 
+  const handleDragStart = (e: DragEvent<HTMLLIElement>, entry: ListedEntry) => {
+    if (entry.type !== 'file') return;
+    e.dataTransfer.setData(dragMimeType(side), entry.name);
+    e.dataTransfer.effectAllowed = 'move';
+  };
+
+  const acceptsDrop = (e: DragEvent<HTMLLIElement>, entry: ListedEntry) =>
+    entry.type === 'file' &&
+    e.dataTransfer.types.includes(dragMimeType(otherSide(side)));
+
+  const handleDragOver = (e: DragEvent<HTMLLIElement>, entry: ListedEntry) => {
+    if (!acceptsDrop(e, entry)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+  };
+
+  const handleDragEnter = (e: DragEvent<HTMLLIElement>, entry: ListedEntry) => {
+    if (!acceptsDrop(e, entry)) return;
+    setDragOverName(entry.name);
+  };
+
+  const handleDragLeave = (e: DragEvent<HTMLLIElement>, entry: ListedEntry) => {
+    // The browser fires dragleave/dragenter on the <li> every time the
+    // pointer crosses into or out of one of its children (the folder icon,
+    // the name button, etc.), not just when it truly leaves the row — left
+    // unguarded, that flickers the drop-target highlight on and off while
+    // hovering. `relatedTarget` is the element the pointer is entering;
+    // if it's still inside this <li>, this isn't a real exit.
+    if (
+      e.relatedTarget instanceof Node &&
+      e.currentTarget.contains(e.relatedTarget)
+    ) {
+      return;
+    }
+    setDragOverName((current) => (current === entry.name ? null : current));
+  };
+
+  const handleDrop = (e: DragEvent<HTMLLIElement>, entry: ListedEntry) => {
+    setDragOverName(null);
+    if (!acceptsDrop(e, entry) || !onRenameDrop) return;
+    e.preventDefault();
+    const draggedName = e.dataTransfer.getData(dragMimeType(otherSide(side)));
+    if (!draggedName || draggedName === entry.name) return;
+    void onRenameDrop(entry.name, draggedName);
+  };
+
   const loadMore = () => fetchFromOffset(entries.length, false);
 
   const visibleEntries = hideMatching
@@ -267,21 +358,26 @@ export function ComparisonPane({
 
   // Covers the case fetchFromOffset's own auto-continue doesn't: "Hide
   // matching" gets toggled ON (or statusByName finishes arriving) *after* a
-  // page already loaded, leaving every already-loaded entry hidden with
-  // nothing on screen to click "Load more" from. `allCurrentlyHidden` is a
-  // plain boolean (not a Map), so it's safe as an effect dependency — it
-  // only actually changes, and re-triggers this, on a true transition, even
-  // though it's recomputed every render. The `isFetchingRef` guard inside
-  // `fetchFromOffset` (not just checking `loading` here) is what actually
-  // prevents this from racing the initial load above.
-  const allCurrentlyHidden =
-    hideMatching === true && entries.length > 0 && visibleEntries.length === 0;
+  // page already loaded, leaving FEWER THAN a full page's worth of visible
+  // entries on screen — anywhere from none at all up to a handful out of a
+  // couple hundred loaded — with nothing to click "Load more" from. Must be
+  // "fewer than a page", not "exactly zero": a page can easily have, say, 5
+  // visible entries out of 200 fetched, which is correct as far as it goes
+  // but still leaves a lot more possibly-visible content unfetched on
+  // later pages. `needsMoreVisible` is a plain boolean (not a Map), so it's
+  // safe as an effect dependency — it only actually changes, and
+  // re-triggers this, on a real transition, even though it's recomputed
+  // every render. The `isFetchingRef` guard inside `fetchFromOffset` (not
+  // just checking `loading` here) is what actually prevents this from
+  // racing the initial load above.
+  const needsMoreVisible =
+    hideMatching === true && visibleEntries.length < PAGE_SIZE;
 
   useEffect(() => {
-    if (!allCurrentlyHidden || !hasMore) return;
+    if (!needsMoreVisible || !hasMore) return;
     void loadMore();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [allCurrentlyHidden, hasMore]);
+  }, [needsMoreVisible, hasMore]);
 
   if (notFound) {
     return (
@@ -308,7 +404,18 @@ export function ComparisonPane({
           return (
             <li
               key={entry.name}
-              className="flex items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent/50"
+              draggable={entry.type === 'file'}
+              onDragStart={(e) => handleDragStart(e, entry)}
+              onDragOver={(e) => handleDragOver(e, entry)}
+              onDragEnter={(e) => handleDragEnter(e, entry)}
+              onDragLeave={(e) => handleDragLeave(e, entry)}
+              onDrop={(e) => handleDrop(e, entry)}
+              className={cn(
+                'flex items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent/50',
+                entry.type === 'file' && 'cursor-grab active:cursor-grabbing',
+                dragOverName === entry.name &&
+                  'bg-accent ring-2 ring-inset ring-primary/50',
+              )}
             >
               {entry.type === 'directory' ? (
                 <>
