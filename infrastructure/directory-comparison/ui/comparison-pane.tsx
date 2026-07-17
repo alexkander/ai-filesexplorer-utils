@@ -1,6 +1,13 @@
 'use client';
 
-import { useEffect, useRef, useState, type DragEvent } from 'react';
+import {
+  useEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type DragEvent,
+  type MouseEvent,
+} from 'react';
 import { Copy, File, Folder, Loader2, Trash2 } from 'lucide-react';
 import { Button } from '@/infrastructure/ui/components/button';
 import { cn } from '@/lib/utils';
@@ -62,6 +69,62 @@ function otherSide(side: 'left' | 'right'): 'left' | 'right' {
 }
 function dragMimeType(sourceSide: 'left' | 'right'): string {
   return `application/x-directory-comparison-entry-${sourceSide}`;
+}
+
+function childPath(currentPath: string, name: string): string {
+  return currentPath === '/' ? `/${name}` : `${currentPath}/${name}`;
+}
+
+// Hover-thumbnail preview (spec: user request): matches by extension only,
+// same trust-the-extension approach `get-thumbnail.ts` uses server-side —
+// no content sniffing, and formats browsers can't render inline (heic/tiff)
+// are deliberately left out even though some cameras/exports use them.
+const IMAGE_EXTENSIONS = new Set([
+  'png',
+  'jpg',
+  'jpeg',
+  'gif',
+  'webp',
+  'bmp',
+  'svg',
+  'avif',
+  'ico',
+]);
+
+function isImageFile(name: string): boolean {
+  const ext = name.split('.').pop()?.toLowerCase();
+  return !!ext && IMAGE_EXTENSIONS.has(ext);
+}
+
+const PREVIEW_HOVER_DELAY_MS = 300;
+const PREVIEW_SIZE_PX = 256;
+const PREVIEW_MARGIN_PX = 8;
+
+interface AnchorRect {
+  top: number;
+  bottom: number;
+  left: number;
+}
+
+// Fixed positioning (viewport-relative) rather than absolute-relative-to-row
+// is deliberate: both panes scroll inside an `overflow-y-auto` ancestor, so
+// an absolutely positioned popup would get clipped whenever the hovered row
+// is near the top/bottom edge of that scroll area. Flips above the row, and
+// clamps horizontally, when there isn't room below/to the right.
+function previewPopupStyle(anchor: AnchorRect): CSSProperties {
+  const spaceBelow = window.innerHeight - anchor.bottom;
+  const top =
+    spaceBelow >= PREVIEW_SIZE_PX + PREVIEW_MARGIN_PX
+      ? anchor.bottom + PREVIEW_MARGIN_PX
+      : Math.max(
+          PREVIEW_MARGIN_PX,
+          anchor.top - PREVIEW_SIZE_PX - PREVIEW_MARGIN_PX,
+        );
+  const left = Math.min(
+    anchor.left,
+    window.innerWidth - PREVIEW_SIZE_PX - PREVIEW_MARGIN_PX,
+  );
+  return { top, left: Math.max(PREVIEW_MARGIN_PX, left) };
 }
 
 // Safety cap on how many pages a single "load more" (or the initial load)
@@ -173,6 +236,17 @@ export function ComparisonPane({
   const [copyingName, setCopyingName] = useState<string | null>(null);
   const [deletingName, setDeletingName] = useState<string | null>(null);
   const [dragOverName, setDragOverName] = useState<string | null>(null);
+  const [previewEntry, setPreviewEntry] = useState<{
+    name: string;
+    anchor: AnchorRect;
+  } | null>(null);
+  const previewTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (previewTimeoutRef.current) clearTimeout(previewTimeoutRef.current);
+    };
+  }, []);
 
   // hideMatching/statusByName deliberately are NOT effect dependencies below
   // — statusByName is a brand-new Map identity on every parent render (every
@@ -347,6 +421,26 @@ export function ComparisonPane({
     void onRenameDrop(entry.name, draggedName);
   };
 
+  const handleNameMouseEnter = (
+    e: MouseEvent<HTMLSpanElement>,
+    entry: ListedEntry,
+  ) => {
+    if (entry.type !== 'file' || !isImageFile(entry.name)) return;
+    const { top, bottom, left } = e.currentTarget.getBoundingClientRect();
+    if (previewTimeoutRef.current) clearTimeout(previewTimeoutRef.current);
+    previewTimeoutRef.current = setTimeout(() => {
+      setPreviewEntry({ name: entry.name, anchor: { top, bottom, left } });
+    }, PREVIEW_HOVER_DELAY_MS);
+  };
+
+  const handleNameMouseLeave = () => {
+    if (previewTimeoutRef.current) {
+      clearTimeout(previewTimeoutRef.current);
+      previewTimeoutRef.current = null;
+    }
+    setPreviewEntry(null);
+  };
+
   const loadMore = () => fetchFromOffset(entries.length, false);
 
   const visibleEntries = hideMatching
@@ -442,7 +536,12 @@ export function ComparisonPane({
                     className={cn(
                       'min-w-0 flex-1 truncate',
                       entry.type !== 'file' && 'text-muted-foreground italic',
+                      entry.type === 'file' &&
+                        isImageFile(entry.name) &&
+                        'cursor-zoom-in',
                     )}
+                    onMouseEnter={(e) => handleNameMouseEnter(e, entry)}
+                    onMouseLeave={handleNameMouseLeave}
                   >
                     {entry.name}
                   </span>
@@ -541,6 +640,21 @@ export function ComparisonPane({
         >
           {loading ? 'Loading…' : 'Load more'}
         </Button>
+      )}
+      {previewEntry && (
+        <div
+          className="pointer-events-none fixed z-50 rounded-md border bg-popover p-1 shadow-lg"
+          style={previewPopupStyle(previewEntry.anchor)}
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element -- arbitrary
+              absolute filesystem paths, not a next/image-compatible source */}
+          <img
+            src={`/api/directory-comparison/thumbnail?path=${encodeURIComponent(childPath(path, previewEntry.name))}`}
+            alt=""
+            className="block max-h-64 max-w-64 rounded object-contain"
+            onError={() => setPreviewEntry(null)}
+          />
+        </div>
       )}
     </div>
   );
