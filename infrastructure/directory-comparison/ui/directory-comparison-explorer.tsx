@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { FolderUp } from 'lucide-react';
 import { Button } from '@/infrastructure/ui/components/button';
-import { CopyablePath } from '@/infrastructure/ui/components/copyable-path';
+import { BreadcrumbPath } from './breadcrumb-path';
 import { ComparisonPane } from './comparison-pane';
 import { ComparisonStatusPanel } from './comparison-status-panel';
 import { ChecksumMatchModal } from './checksum-match-modal';
@@ -12,7 +12,12 @@ import {
   useComparisonStatus,
   type ComparisonView,
 } from './use-comparison-status';
-import { getParentPath, isWithinSubtree } from '@/domain/scanning/path-info';
+import {
+  getDepth,
+  getParentPath,
+  isWithinSubtree,
+  popPathSegments,
+} from '@/domain/scanning/path-info';
 import type { EntryComparisonStatus } from '@/domain/directory-comparison/entry-comparison-result';
 import type { SizeInfo } from '@/application/directory-comparison/size-info-port';
 import type {
@@ -228,6 +233,26 @@ export function DirectoryComparisonExplorer() {
     }
   };
 
+  // Breadcrumb click (spec: user request) — unlike navigateInto/navigateUp,
+  // a breadcrumb can jump up an arbitrary number of levels in one click, so
+  // "Move sync" has to pop that same number of segments off the OTHER
+  // side's path too, not just one.
+  const navigateToPath = (pane: 'left' | 'right', targetPath: string) => {
+    if (pane === 'left') {
+      if (moveSync) {
+        const poppedCount = getDepth(leftPath) - getDepth(targetPath);
+        setRightPath(popPathSegments(rightPath, poppedCount));
+      }
+      setLeftPath(targetPath);
+    } else {
+      if (moveSync) {
+        const poppedCount = getDepth(rightPath) - getDepth(targetPath);
+        setLeftPath(popPathSegments(leftPath, poppedCount));
+      }
+      setRightPath(targetPath);
+    }
+  };
+
   const copyToOtherSide = async (fromSide: 'left' | 'right', name: string) => {
     const sourceParent = fromSide === 'left' ? leftPath : rightPath;
     const destinationParent = fromSide === 'left' ? rightPath : leftPath;
@@ -340,6 +365,54 @@ export function DirectoryComparisonExplorer() {
 
     if (side === 'left') setLeftRefreshToken((t) => t + 1);
     else setRightRefreshToken((t) => t + 1);
+    await refetch();
+  };
+
+  // Drag-and-drop move onto a breadcrumb (spec: user request): dropping a
+  // file dragged from either pane onto a breadcrumb segment moves it into
+  // that directory. Unlike renameViaDrop this isn't cross-side-only — the
+  // dragged file's OWN side and the breadcrumb's side can be the same
+  // (moving into one of its own ancestor directories) or different (moving
+  // across to the other tree), and unlike a same-directory rename this is
+  // a genuine move, so it can land on a different filesystem/mount (see
+  // move-adapter.ts's EXDEV fallback).
+  const moveViaBreadcrumbDrop = async (
+    targetDirPath: string,
+    draggedSide: 'left' | 'right',
+    draggedName: string,
+  ) => {
+    const sourceParent = draggedSide === 'left' ? leftPath : rightPath;
+    const sourcePath = childPath(sourceParent, draggedName);
+    const destinationPath = childPath(targetDirPath, draggedName);
+
+    if (sourcePath === destinationPath) return;
+
+    if (
+      !window.confirm(
+        `Move "${sourcePath}" to "${targetDirPath}"?\n\nThe file is moved, not copied — it will no longer exist at its original location.`,
+      )
+    ) {
+      return;
+    }
+
+    const res = await fetch('/api/directory-comparison/move', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sourcePath, destinationPath }),
+    });
+
+    if (!res.ok) {
+      const body = (await res.json().catch(() => null)) as {
+        error?: string;
+      } | null;
+      window.alert(`Move failed: ${body?.error ?? res.statusText}`);
+      return;
+    }
+
+    if (draggedSide === 'left') setLeftRefreshToken((t) => t + 1);
+    else setRightRefreshToken((t) => t + 1);
+    if (targetDirPath === leftPath) setLeftRefreshToken((t) => t + 1);
+    if (targetDirPath === rightPath) setRightRefreshToken((t) => t + 1);
     await refetch();
   };
 
@@ -560,9 +633,16 @@ export function DirectoryComparisonExplorer() {
             >
               <FolderUp className="size-4" aria-hidden="true" />
             </Button>
-            <CopyablePath
+            <BreadcrumbPath
               path={leftPath}
-              className="min-w-0 flex-1 truncate text-sm text-muted-foreground"
+              onNavigate={(target) => navigateToPath('left', target)}
+              onDropFile={(targetDirPath, draggedSide, draggedName) =>
+                void moveViaBreadcrumbDrop(
+                  targetDirPath,
+                  draggedSide,
+                  draggedName,
+                )
+              }
             />
             <PaneOwnInfo
               sizeInfo={view?.leftSizeInfo}
@@ -612,9 +692,16 @@ export function DirectoryComparisonExplorer() {
             >
               <FolderUp className="size-4" aria-hidden="true" />
             </Button>
-            <CopyablePath
+            <BreadcrumbPath
               path={rightPath}
-              className="min-w-0 flex-1 truncate text-sm text-muted-foreground"
+              onNavigate={(target) => navigateToPath('right', target)}
+              onDropFile={(targetDirPath, draggedSide, draggedName) =>
+                void moveViaBreadcrumbDrop(
+                  targetDirPath,
+                  draggedSide,
+                  draggedName,
+                )
+              }
             />
             <PaneOwnInfo
               sizeInfo={view?.rightSizeInfo}

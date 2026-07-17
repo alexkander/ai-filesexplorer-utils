@@ -23,6 +23,7 @@ import {
   COMPARISON_STATUS_LABELS,
 } from './comparison-status-colors';
 import { humanizeSize, exactBytesLabel } from './format-size';
+import { dragMimeType, otherSide } from './drag-mime-types';
 
 const PAGE_SIZE = 200;
 
@@ -55,21 +56,6 @@ const MATCHING_STATUSES: ReadonlySet<EntryComparisonStatus> = new Set([
   'matching',
   'matching_empty',
 ]);
-
-// Drag-and-drop rename (spec: user request): drag a file from one pane onto
-// a file on the other pane to rename the drop target to the dragged file's
-// name. One MIME type per SOURCE side (rather than a single type with the
-// side inside a JSON payload) so `onDragOver` can tell a same-side drag
-// from a cross-side one just from `dataTransfer.types` — browsers withhold
-// `getData` until the actual `drop` for security, so encoding the side in
-// the type itself is the only way to gate hover feedback (and the
-// `preventDefault` that allows a drop at all) to valid cross-side drags.
-function otherSide(side: 'left' | 'right'): 'left' | 'right' {
-  return side === 'left' ? 'right' : 'left';
-}
-function dragMimeType(sourceSide: 'left' | 'right'): string {
-  return `application/x-directory-comparison-entry-${sourceSide}`;
-}
 
 function childPath(currentPath: string, name: string): string {
   return currentPath === '/' ? `/${name}` : `${currentPath}/${name}`;
