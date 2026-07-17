@@ -6,6 +6,8 @@ import { Button } from '@/infrastructure/ui/components/button';
 import { CopyablePath } from '@/infrastructure/ui/components/copyable-path';
 import { ComparisonPane } from './comparison-pane';
 import { ComparisonStatusPanel } from './comparison-status-panel';
+import { ChecksumMatchModal } from './checksum-match-modal';
+import type { RenamePlanStep } from '@/domain/directory-comparison/build-rename-plan';
 import {
   useComparisonStatus,
   type ComparisonView,
@@ -176,6 +178,20 @@ export function DirectoryComparisonExplorer() {
   const [leftRefreshToken, setLeftRefreshToken] = useState(0);
   const [rightRefreshToken, setRightRefreshToken] = useState(0);
 
+  const [checksumModalOpen, setChecksumModalOpen] = useState(false);
+  const [checksumMatchesLoading, setChecksumMatchesLoading] = useState(false);
+  const [checksumPlan, setChecksumPlan] = useState<RenamePlanStep[]>([]);
+  // Parallel to checksumPlan — the REAL name each completed step actually
+  // produced (a backup step's real timestamped name, or a normal step's
+  // literal destination). -1/all-null until steps actually run.
+  const [checksumStepResults, setChecksumStepResults] = useState<
+    (string | null)[]
+  >([]);
+  const [checksumCompletedThrough, setChecksumCompletedThrough] = useState(-1);
+  const [checksumExecutingIndex, setChecksumExecutingIndex] = useState<
+    number | null
+  >(null);
+
   const leftActivePath = activePathForSide(
     view?.activePath ?? null,
     view?.activePair ?? null,
@@ -327,6 +343,132 @@ export function DirectoryComparisonExplorer() {
     await refetch();
   };
 
+  // Checksum-match search (spec: user request): among files that don't
+  // match by name between the two panes, find ones whose content is
+  // identical to some other mismatched file on the other side — evidence
+  // of a rename — and offer a step-by-step plan to rename the LEFT side's
+  // files to match. Matches can chain into each other or form a rename
+  // cycle (a straight swap, or a longer loop) — the backend's
+  // build-rename-plan.ts already sequences that into safe, ordered atomic
+  // steps; this component just executes them in order.
+  const findChecksumMatches = async () => {
+    setChecksumModalOpen(true);
+    setChecksumMatchesLoading(true);
+    setChecksumPlan([]);
+    setChecksumStepResults([]);
+    setChecksumCompletedThrough(-1);
+    try {
+      const res = await fetch('/api/directory-comparison/checksum-matches', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ leftPath, rightPath }),
+      });
+      if (!res.ok) {
+        window.alert('Searching for checksum matches failed.');
+        setChecksumModalOpen(false);
+        return;
+      }
+      const body = (await res.json()) as { plan: RenamePlanStep[] };
+      setChecksumPlan(body.plan);
+      setChecksumStepResults(body.plan.map(() => null));
+    } finally {
+      setChecksumMatchesLoading(false);
+    }
+  };
+
+  // Executes exactly one plan step — resolving its source from an earlier
+  // step's REAL result when it depends on one (a cycle-breaking backup's
+  // timestamped name isn't known until that backup has actually run).
+  // Returns the real name this step actually produced (also used as the
+  // NEXT step's source, if that one depends on this one) or `null` on
+  // failure — returned rather than only stored in state, since state
+  // updates aren't visible to the next loop iteration within the same
+  // synchronous batch of awaits (renameAllChecksumSteps below).
+  const executeChecksumStep = async (
+    index: number,
+    plan: RenamePlanStep[],
+    stepResults: (string | null)[],
+  ): Promise<string | null> => {
+    const step = plan[index];
+    const sourceName =
+      typeof step.sourceName === 'string'
+        ? step.sourceName
+        : stepResults[step.sourceName.dependsOnStepIndex]!;
+    const sourcePath = childPath(leftPath, sourceName);
+
+    setChecksumExecutingIndex(index);
+    try {
+      let resultName: string;
+      if (step.isBackup) {
+        const res = await fetch('/api/directory-comparison/backup', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ path: sourcePath }),
+        });
+        const resBody = (await res.json().catch(() => null)) as {
+          error?: string;
+          backedUpAs?: string;
+        } | null;
+        if (!res.ok || !resBody?.backedUpAs) {
+          window.alert(
+            `Step ${index + 1} failed: ${resBody?.error ?? res.statusText}`,
+          );
+          return null;
+        }
+        resultName = resBody.backedUpAs;
+      } else {
+        const destinationPath = childPath(leftPath, step.destinationName);
+        const res = await fetch('/api/directory-comparison/rename', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sourcePath, destinationPath }),
+        });
+        if (!res.ok) {
+          const resBody = (await res.json().catch(() => null)) as {
+            error?: string;
+          } | null;
+          window.alert(
+            `Step ${index + 1} failed: ${resBody?.error ?? res.statusText}`,
+          );
+          return null;
+        }
+        resultName = step.destinationName;
+      }
+
+      setChecksumStepResults((current) => {
+        const next = [...current];
+        next[index] = resultName;
+        return next;
+      });
+      setChecksumCompletedThrough(index);
+      setLeftRefreshToken((t) => t + 1);
+      await refetch();
+      return resultName;
+    } finally {
+      setChecksumExecutingIndex(null);
+    }
+  };
+
+  const renameChecksumStep = (index: number) => {
+    void executeChecksumStep(index, checksumPlan, checksumStepResults);
+  };
+
+  const renameAllChecksumSteps = async () => {
+    if (
+      !window.confirm(
+        `Run all ${checksumPlan.length - checksumCompletedThrough - 1} remaining rename step(s) now?`,
+      )
+    ) {
+      return;
+    }
+    const results = [...checksumStepResults];
+    for (let i = checksumCompletedThrough + 1; i < checksumPlan.length; i++) {
+      const result = await executeChecksumStep(i, checksumPlan, results);
+      if (result === null) return;
+      results[i] = result;
+    }
+  };
+
   const navigateUp = (pane: 'left' | 'right') => {
     if (pane === 'left') {
       const parent = getParentPath(leftPath);
@@ -389,6 +531,13 @@ export function DirectoryComparisonExplorer() {
               </button>
             ))}
           </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => void findChecksumMatches()}
+          >
+            Find checksum matches
+          </Button>
         </div>
         <ComparisonStatusPanel
           view={view}
@@ -501,6 +650,17 @@ export function DirectoryComparisonExplorer() {
           )}
         </div>
       </div>
+      <ChecksumMatchModal
+        open={checksumModalOpen}
+        onOpenChange={setChecksumModalOpen}
+        loading={checksumMatchesLoading}
+        plan={checksumPlan}
+        completedThrough={checksumCompletedThrough}
+        stepResults={checksumStepResults}
+        executingIndex={checksumExecutingIndex}
+        onRenameStep={renameChecksumStep}
+        onRenameAll={() => void renameAllChecksumSteps()}
+      />
     </div>
   );
 }
