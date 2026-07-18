@@ -19,30 +19,40 @@ const dbPath =
 // `fileMustExist: true` means opening throws if Count and Size has never
 // been run yet; caught below so this feature degrades to "no data
 // available" instead of failing to start.
-let db: Database.Database | null = null;
+//
+// The `.prepare()` call below is wrapped in the SAME try/catch as the
+// constructor (not left to throw on its own) — found necessary post-
+// implementation: a fresh build/first run can hit a narrow window where
+// the file exists (better-sqlite3 creates it the instant `new Database()`
+// runs) but Count and Size's own sqlite-client.ts, evaluated concurrently
+// by Next's build in a different route's module graph, hasn't executed
+// its `CREATE TABLE` statements yet — `directory_scan_nodes` genuinely
+// doesn't exist yet even though the file does, and `.prepare()` against a
+// missing table throws immediately, unlike a query against an
+// existing-but-empty table.
+let getAggregateStmt: Database.Statement | undefined;
 try {
-  db = new Database(dbPath, { readonly: true, fileMustExist: true });
+  const db = new Database(dbPath, { readonly: true, fileMustExist: true });
+  getAggregateStmt = db.prepare(`
+    WITH RECURSIVE subtree(path) AS (
+      SELECT path FROM directory_scan_nodes WHERE path = ?
+      UNION ALL
+      SELECT d.path FROM directory_scan_nodes d
+        JOIN subtree s ON d.parent_path = s.path
+    )
+    SELECT
+      COUNT(*) AS node_count,
+      COALESCE(SUM(n.direct_file_count), 0) AS total_count,
+      COALESCE(SUM(n.direct_file_size), 0) AS total_size,
+      MIN(CASE
+        WHEN n.own_outcome = 'done' AND n.has_unreadable_entries = 0 THEN 1
+        ELSE 0
+      END) AS all_complete
+    FROM directory_scan_nodes n JOIN subtree s ON n.path = s.path
+  `);
 } catch {
-  db = null;
+  getAggregateStmt = undefined;
 }
-
-const getAggregateStmt = db?.prepare(`
-  WITH RECURSIVE subtree(path) AS (
-    SELECT path FROM directory_scan_nodes WHERE path = ?
-    UNION ALL
-    SELECT d.path FROM directory_scan_nodes d
-      JOIN subtree s ON d.parent_path = s.path
-  )
-  SELECT
-    COUNT(*) AS node_count,
-    COALESCE(SUM(n.direct_file_count), 0) AS total_count,
-    COALESCE(SUM(n.direct_file_size), 0) AS total_size,
-    MIN(CASE
-      WHEN n.own_outcome = 'done' AND n.has_unreadable_entries = 0 THEN 1
-      ELSE 0
-    END) AS all_complete
-  FROM directory_scan_nodes n JOIN subtree s ON n.path = s.path
-`);
 
 interface AggregateRow {
   node_count: number;

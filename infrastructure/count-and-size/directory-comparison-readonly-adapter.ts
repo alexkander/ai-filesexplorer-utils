@@ -15,19 +15,31 @@ const dbPath =
 // the other direction. `fileMustExist: true` means opening throws if
 // directory-comparison has never been run yet; caught below so this
 // feature degrades to "no data available" instead of failing to start.
-let db: Database.Database | null = null;
+//
+// The `.prepare()` calls below are wrapped in the SAME try/catch as the
+// constructor (not left to throw on their own) — found necessary post-
+// implementation: a fresh build/first run can hit a narrow window where
+// the file exists (better-sqlite3 creates it the instant `new Database()`
+// runs) but directory-comparison's own sqlite-client.ts, evaluated
+// concurrently by Next's build in a different route's module graph,
+// hasn't executed its `CREATE TABLE` statements yet — `file_checksums`
+// genuinely doesn't exist yet even though the file does, and `.prepare()`
+// against a missing table throws immediately, unlike a query against an
+// existing-but-empty table.
+let getFileChecksumStmt: Database.Statement | undefined;
+let getDirChecksumStmt: Database.Statement | undefined;
 try {
-  db = new Database(dbPath, { readonly: true, fileMustExist: true });
+  const db = new Database(dbPath, { readonly: true, fileMustExist: true });
+  getFileChecksumStmt = db.prepare(
+    `SELECT full_checksum FROM file_checksums WHERE path = ?`,
+  );
+  getDirChecksumStmt = db.prepare(
+    `SELECT directory_checksum FROM directory_comparison_nodes WHERE path = ?`,
+  );
 } catch {
-  db = null;
+  getFileChecksumStmt = undefined;
+  getDirChecksumStmt = undefined;
 }
-
-const getFileChecksumStmt = db?.prepare(
-  `SELECT full_checksum FROM file_checksums WHERE path = ?`,
-);
-const getDirChecksumStmt = db?.prepare(
-  `SELECT directory_checksum FROM directory_comparison_nodes WHERE path = ?`,
-);
 
 export const directoryComparisonReadonlyAdapter: ChecksumInfoPort = {
   getChecksum(targetPath: string): string | null {
