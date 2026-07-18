@@ -4,6 +4,8 @@ services:
       context: .
       target: dev
       network: host
+      args:
+        PORT: ${PORT:-3000}
     network_mode: host
     volumes:
       - .:/app
@@ -12,3 +14,4 @@ services:
       - ${MYFILES}:${MYFILES}
     environment:
       - WATCHPACK_POLLING=true
+      - PORT=${PORT:-3000}

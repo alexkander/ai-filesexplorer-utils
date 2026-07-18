@@ -13,7 +13,9 @@ tests yet).
 
 ## Commands
 
-- `pnpm dev` — start the dev server (http://localhost:3000)
+- `pnpm dev` — start the dev server (http://localhost:3000 by default; set
+  `PORT` in `.env`/the environment to use a different port — read natively by
+  `next dev`/`next start`)
 - `pnpm build` — production build (`output: 'standalone'` in `next.config.ts`)
 - `pnpm start` — run the production build
 - `pnpm lint` / `pnpm lint:fix` — ESLint (flat config, `eslint.config.mjs`,
@@ -44,8 +46,9 @@ nothing duplicated between them:
   mounted as a volume for hot-reload, `node_modules`/`.next` as anonymous
   volumes).
 - `runner` stage: `node:22-alpine`, copies only the Next.js `standalone` output
-  — no pnpm, no source. Used by `docker-compose.prod.yml` (port `3000:3000`
-  published, no bind mounts).
+  — no pnpm, no source. Used by `docker-compose.prod.yml` (port `3000:3000` by
+  default, published, no bind mounts — both sides of the mapping come from
+  `PORT` in `.env`).
 
 `.devcontainer/devcontainer.json` (VS Code Dev Containers) does **not** use the
 `Dockerfile` or Compose at all: it builds from the plain `node:22-bookworm-slim`
