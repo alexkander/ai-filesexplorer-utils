@@ -216,6 +216,9 @@ const setIgnoredStmt = db.prepare(`
 const clearIgnoredStmt = db.prepare(
   `DELETE FROM ignored_paths WHERE path = @path`,
 );
+const listIgnoredPathsStmt = db.prepare(
+  `SELECT path, ignored_at FROM ignored_paths ORDER BY ignored_at DESC`,
+);
 
 export const comparisonRepositoryAdapter: ComparisonRepositoryPort = {
   upsertPendingDirectory(path, parentPath, depth) {
@@ -327,5 +330,13 @@ export const comparisonRepositoryAdapter: ComparisonRepositoryPort = {
     } else {
       clearIgnoredStmt.run({ path });
     }
+  },
+
+  listIgnoredPaths() {
+    const rows = listIgnoredPathsStmt.all() as {
+      path: string;
+      ignored_at: string;
+    }[];
+    return rows.map((r) => ({ path: r.path, ignoredAt: r.ignored_at }));
   },
 };

@@ -105,6 +105,9 @@ export interface ComparisonRepositoryPort {
   // status to `ignored` regardless of what comparison data exists).
   isIgnored(path: string): boolean;
   setIgnored(path: string, ignored: boolean): void;
+  // Every currently-ignored path (spec: user request — a dedicated view
+  // listing them all), most-recently-ignored first.
+  listIgnoredPaths(): { path: string; ignoredAt: string }[];
 
   // Pass 2 only, `mode: 'incremental'` cache-hit shortcut: `isCacheStillValid`
   // already confirmed (recursively) that every directory in this subtree has

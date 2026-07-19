@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { FolderUp } from 'lucide-react';
 import { Button } from '@/infrastructure/ui/components/button';
 import { BreadcrumbPath } from './breadcrumb-path';
@@ -670,6 +671,9 @@ export function DirectoryComparisonExplorer() {
             onClick={() => void findChecksumMatches()}
           >
             Find checksum matches
+          </Button>
+          <Button variant="outline" size="sm" asChild>
+            <Link href="/directory-comparison/ignored">Ignored paths</Link>
           </Button>
         </div>
         <ComparisonStatusPanel
