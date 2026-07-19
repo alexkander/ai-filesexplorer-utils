@@ -96,6 +96,16 @@ export interface ComparisonRepositoryPort {
   // full re-compare means every entry genuinely goes back to not_compared
   // until Pass 2 concludes something fresh).
   clearChecksumsInSubtree(path: string): void;
+  // Ignore list (spec: user request) — a path the user has explicitly
+  // marked to skip during Compare (double-clicking its status dot).
+  // Checked by both passes (Pass 1 skips listing an ignored directory's
+  // children at all; Pass 2 excludes an ignored entry from its parent's
+  // matching/Merkle rollup entirely, same treatment as an empty-on-one-
+  // side directory) and by read-time derivation (overrides the entry's
+  // status to `ignored` regardless of what comparison data exists).
+  isIgnored(path: string): boolean;
+  setIgnored(path: string, ignored: boolean): void;
+
   // Pass 2 only, `mode: 'incremental'` cache-hit shortcut: `isCacheStillValid`
   // already confirmed (recursively) that every directory in this subtree has
   // a non-null checksum and every file/subdirectory under it is still fresh

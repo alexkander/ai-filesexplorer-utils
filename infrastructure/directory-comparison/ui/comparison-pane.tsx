@@ -122,24 +122,32 @@ const MAX_AUTO_PAGES = 50;
 function isEntryHidden(
   entry: ListedEntry,
   statusByName: Map<string, EntryComparisonStatus> | undefined,
+  hideMatching: boolean,
+  hideIgnored: boolean,
 ): boolean {
   const status = statusByName?.get(entry.name);
-  return !!status && MATCHING_STATUSES.has(status);
+  if (!status) return false;
+  if (hideMatching && MATCHING_STATUSES.has(status)) return true;
+  if (hideIgnored && status === 'ignored') return true;
+  return false;
 }
 
-// Count of entries in this page that "Hide matching" would NOT hide — used
-// to decide whether a fetch should keep auto-continuing to the next page.
-// Stopping as soon as a page has *any* visible entry (the original check)
-// undercounts badly: a page of 100 fetched entries with only 10 visible
-// would surface just those 10 and stop, instead of continuing to fill out
-// something closer to a full page's worth of entries actually worth
-// looking at.
+// Count of entries in this page that neither active "Hide…" filter would
+// hide — used to decide whether a fetch should keep auto-continuing to the
+// next page. Stopping as soon as a page has *any* visible entry (the
+// original check) undercounts badly: a page of 100 fetched entries with
+// only 10 visible would surface just those 10 and stop, instead of
+// continuing to fill out something closer to a full page's worth of
+// entries actually worth looking at.
 function countVisible(
   pageEntries: ListedEntry[],
   statusByName: Map<string, EntryComparisonStatus> | undefined,
+  hideMatching: boolean,
+  hideIgnored: boolean,
 ): number {
-  return pageEntries.filter((entry) => !isEntryHidden(entry, statusByName))
-    .length;
+  return pageEntries.filter(
+    (entry) => !isEntryHidden(entry, statusByName, hideMatching, hideIgnored),
+  ).length;
 }
 
 export function ComparisonPane({
@@ -152,9 +160,11 @@ export function ComparisonPane({
   onCopyToOtherSide,
   onDeleteFromThisSide,
   onRenameDrop,
+  onToggleIgnore,
   sortBy,
   sortDir,
   hideMatching,
+  hideIgnored,
 }: {
   path: string;
   /** Which pane this is — determines which "only on this side" status
@@ -200,6 +210,11 @@ export function ComparisonPane({
    * prompt, the actual rename request, and re-fetching this pane's own
    * listing afterward. */
   onRenameDrop?: (droppedOnName: string, draggedName: string) => Promise<void>;
+  /** Called with the entry name when its status dot is double-clicked
+   * (spec: user request) — toggles whether this exact entry is excluded
+   * from Compare. The parent owns the actual request, "Move sync"
+   * mirroring onto the other side, and re-fetching afterward. */
+  onToggleIgnore?: (name: string) => void;
   /** Shared by both panes — set by the parent's single sort control. */
   sortBy: SortBy;
   sortDir: SortDir;
@@ -213,6 +228,11 @@ export function ComparisonPane({
    * visible entries among hundreds hidden would surface just those few and
    * stop. */
   hideMatching?: boolean;
+  /** Shared by both panes — hides entries explicitly marked `ignored`
+   * (spec: user request), independent of `hideMatching` (either, both, or
+   * neither can be on at once). Drives the same auto-fetch-more-pages
+   * pagination behavior as `hideMatching`. */
+  hideIgnored?: boolean;
 }) {
   const [entries, setEntries] = useState<ListedEntry[]>([]);
   const [hasMore, setHasMore] = useState(false);
@@ -240,11 +260,13 @@ export function ComparisonPane({
   // from scratch constantly. Refs let the fetch loop read the latest value
   // each iteration without that.
   const hideMatchingRef = useRef(hideMatching);
+  const hideIgnoredRef = useRef(hideIgnored);
   const statusByNameRef = useRef(statusByName);
   useEffect(() => {
     hideMatchingRef.current = hideMatching;
+    hideIgnoredRef.current = hideIgnored;
     statusByNameRef.current = statusByName;
-  }, [hideMatching, statusByName]);
+  }, [hideMatching, hideIgnored, statusByName]);
 
   // Generation counter + busy flag guarding every path that can fetch a
   // page (initial load, "Load more", and the auto-continue effect below).
@@ -313,12 +335,15 @@ export function ComparisonPane({
         visibleAccumulated += countVisible(
           result.page.entries,
           statusByNameRef.current,
+          hideMatchingRef.current === true,
+          hideIgnoredRef.current === true,
         );
         setEntries(collected);
         setHasMore(result.page.hasMore);
 
         const keepGoing =
-          hideMatchingRef.current === true &&
+          (hideMatchingRef.current === true ||
+            hideIgnoredRef.current === true) &&
           visibleAccumulated < PAGE_SIZE &&
           result.page.hasMore &&
           pagesFetched < MAX_AUTO_PAGES;
@@ -429,29 +454,33 @@ export function ComparisonPane({
 
   const loadMore = () => fetchFromOffset(entries.length, false);
 
-  const visibleEntries = hideMatching
-    ? entries.filter((entry) => {
-        const status = statusByName?.get(entry.name);
-        return !status || !MATCHING_STATUSES.has(status);
-      })
-    : entries;
+  const visibleEntries = entries.filter(
+    (entry) =>
+      !isEntryHidden(
+        entry,
+        statusByName,
+        hideMatching === true,
+        hideIgnored === true,
+      ),
+  );
 
   // Covers the case fetchFromOffset's own auto-continue doesn't: "Hide
-  // matching" gets toggled ON (or statusByName finishes arriving) *after* a
-  // page already loaded, leaving FEWER THAN a full page's worth of visible
-  // entries on screen — anywhere from none at all up to a handful out of a
-  // couple hundred loaded — with nothing to click "Load more" from. Must be
-  // "fewer than a page", not "exactly zero": a page can easily have, say, 5
-  // visible entries out of 200 fetched, which is correct as far as it goes
-  // but still leaves a lot more possibly-visible content unfetched on
-  // later pages. `needsMoreVisible` is a plain boolean (not a Map), so it's
-  // safe as an effect dependency — it only actually changes, and
-  // re-triggers this, on a real transition, even though it's recomputed
-  // every render. The `isFetchingRef` guard inside `fetchFromOffset` (not
-  // just checking `loading` here) is what actually prevents this from
-  // racing the initial load above.
+  // matching"/"Hide ignored" gets toggled ON (or statusByName finishes
+  // arriving) *after* a page already loaded, leaving FEWER THAN a full
+  // page's worth of visible entries on screen — anywhere from none at all
+  // up to a handful out of a couple hundred loaded — with nothing to click
+  // "Load more" from. Must be "fewer than a page", not "exactly zero": a
+  // page can easily have, say, 5 visible entries out of 200 fetched, which
+  // is correct as far as it goes but still leaves a lot more
+  // possibly-visible content unfetched on later pages. `needsMoreVisible`
+  // is a plain boolean (not a Map), so it's safe as an effect dependency —
+  // it only actually changes, and re-triggers this, on a real transition,
+  // even though it's recomputed every render. The `isFetchingRef` guard
+  // inside `fetchFromOffset` (not just checking `loading` here) is what
+  // actually prevents this from racing the initial load above.
   const needsMoreVisible =
-    hideMatching === true && visibleEntries.length < PAGE_SIZE;
+    (hideMatching === true || hideIgnored === true) &&
+    visibleEntries.length < PAGE_SIZE;
 
   useEffect(() => {
     if (!needsMoreVisible || !hasMore) return;
@@ -551,6 +580,14 @@ export function ComparisonPane({
                   )}
                 </span>
               )}
+              {entry.type === 'file' && entry.size !== undefined && (
+                <span
+                  className="shrink-0 text-xs text-muted-foreground"
+                  title={exactBytesLabel(entry.size)}
+                >
+                  {humanizeSize(entry.size)}
+                </span>
+              )}
               {checksum && (
                 <span
                   className="shrink-0 font-mono text-xs text-muted-foreground"
@@ -561,11 +598,17 @@ export function ComparisonPane({
               )}
               {status && (
                 <span
+                  onDoubleClick={() => onToggleIgnore?.(entry.name)}
                   className={cn(
                     'inline-block size-2.5 shrink-0 rounded-full',
+                    onToggleIgnore && 'cursor-pointer',
                     COMPARISON_STATUS_COLORS[status],
                   )}
-                  title={COMPARISON_STATUS_LABELS[status]}
+                  title={
+                    onToggleIgnore
+                      ? `${COMPARISON_STATUS_LABELS[status]} (double-click to ${status === 'ignored' ? 'un-ignore' : 'ignore'})`
+                      : COMPARISON_STATUS_LABELS[status]
+                  }
                 />
               )}
               {status === ONLY_ON_THIS_SIDE[side] && onCopyToOtherSide && (

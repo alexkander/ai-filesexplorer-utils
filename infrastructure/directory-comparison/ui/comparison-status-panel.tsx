@@ -23,12 +23,18 @@ function currentPass(
 export function ComparisonStatusPanel({
   view,
   starting,
+  compareDisabled,
   onCompare,
   onForceFullRecompare,
   onStop,
 }: {
   view: ComparisonView | null;
   starting: boolean;
+  /** True when either pane's current path (or an ancestor of it) is marked
+   * ignored (spec: user request) — an ignored directory's own children are
+   * never listed by Pass 1, so a Compare scoped underneath one would have
+   * nothing to work with. */
+  compareDisabled: boolean;
   onCompare: () => void;
   onForceFullRecompare: () => void;
   onStop: () => void;
@@ -38,8 +44,13 @@ export function ComparisonStatusPanel({
       <Button
         variant="outline"
         size="sm"
-        disabled={starting}
+        disabled={starting || compareDisabled}
         onClick={onCompare}
+        title={
+          compareDisabled
+            ? 'One of the panes is inside an ignored directory'
+            : undefined
+        }
       >
         <ScanLine className="size-4" aria-hidden="true" />
         Compare
@@ -47,9 +58,13 @@ export function ComparisonStatusPanel({
       <Button
         variant="outline"
         size="sm"
-        disabled={starting}
+        disabled={starting || compareDisabled}
         onClick={onForceFullRecompare}
-        title="Ignore existing results and recompute everything from scratch on both sides"
+        title={
+          compareDisabled
+            ? 'One of the panes is inside an ignored directory'
+            : 'Ignore existing results and recompute everything from scratch on both sides'
+        }
       >
         <RefreshCw className="size-4" aria-hidden="true" />
         Force full re-compare

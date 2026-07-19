@@ -139,6 +139,7 @@ export function DirectoryComparisonExplorer() {
   const [sortBy, setSortBy] = useState<SortBy>('name');
   const [sortDir, setSortDir] = useState<SortDir>('asc');
   const [hideMatching, setHideMatching] = useState(false);
+  const [hideIgnored, setHideIgnored] = useState(false);
   const [hydrated, setHydrated] = useState(false);
 
   useEffect(() => {
@@ -150,6 +151,7 @@ export function DirectoryComparisonExplorer() {
     setSortBy(state.sortBy);
     setSortDir(state.sortDir);
     setHideMatching(state.hideMatching);
+    setHideIgnored(state.hideIgnored);
     setHydrated(true);
   }, []);
 
@@ -162,9 +164,19 @@ export function DirectoryComparisonExplorer() {
       sortBy,
       sortDir,
       hideMatching,
+      hideIgnored,
     };
     savePanes(state);
-  }, [leftPath, rightPath, moveSync, sortBy, sortDir, hideMatching, hydrated]);
+  }, [
+    leftPath,
+    rightPath,
+    moveSync,
+    sortBy,
+    sortDir,
+    hideMatching,
+    hideIgnored,
+    hydrated,
+  ]);
 
   const handleSortClick = (field: SortBy) => {
     if (field === sortBy) {
@@ -416,6 +428,46 @@ export function DirectoryComparisonExplorer() {
     await refetch();
   };
 
+  // Double-click a status dot to ignore/un-ignore that exact entry (spec:
+  // user request) — excludes it from Compare entirely (Pass 1 stops
+  // listing its children, Pass 2 excludes it from its parent's matching
+  // rollup). No confirmation prompt: unlike copy/delete/rename/move, this
+  // touches no filesystem state at all and is trivially reversible by
+  // double-clicking again. If "Move sync" is on, the same NAME on the
+  // other side is toggled too (best-effort — the other side may not have
+  // an entry there at all, in which case its own request below is a
+  // harmless no-op row that simply never matches anything).
+  const toggleIgnore = async (side: 'left' | 'right', name: string) => {
+    const statusByName = side === 'left' ? leftStatusByName : rightStatusByName;
+    const currentlyIgnored = statusByName.get(name) === 'ignored';
+    const nextIgnored = !currentlyIgnored;
+
+    const setIgnoredAt = async (parent: string) => {
+      const res = await fetch('/api/directory-comparison/ignore', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          path: childPath(parent, name),
+          ignored: nextIgnored,
+        }),
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => null)) as {
+          error?: string;
+        } | null;
+        window.alert(
+          `Failed to ${nextIgnored ? 'ignore' : 'un-ignore'}: ${body?.error ?? res.statusText}`,
+        );
+      }
+    };
+
+    await setIgnoredAt(side === 'left' ? leftPath : rightPath);
+    if (moveSync) {
+      await setIgnoredAt(side === 'left' ? rightPath : leftPath);
+    }
+    await refetch();
+  };
+
   // Checksum-match search (spec: user request): among files that don't
   // match by name between the two panes, find ones whose content is
   // identical to some other mismatched file on the other side — evidence
@@ -586,6 +638,14 @@ export function DirectoryComparisonExplorer() {
             />
             Hide matching
           </label>
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={hideIgnored}
+              onChange={(e) => setHideIgnored(e.target.checked)}
+            />
+            Hide ignored
+          </label>
           <div className="flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
             <span>Sort by:</span>
             {SORT_OPTIONS.map((option) => (
@@ -615,6 +675,7 @@ export function DirectoryComparisonExplorer() {
         <ComparisonStatusPanel
           view={view}
           starting={starting}
+          compareDisabled={view?.compareDisabled ?? false}
           onCompare={() => void compare()}
           onForceFullRecompare={() => void compare('full')}
           onStop={() => void stop()}
@@ -663,9 +724,11 @@ export function DirectoryComparisonExplorer() {
               onRenameDrop={(droppedOnName, draggedName) =>
                 renameViaDrop('left', droppedOnName, draggedName)
               }
+              onToggleIgnore={(name) => void toggleIgnore('left', name)}
               sortBy={sortBy}
               sortDir={sortDir}
               hideMatching={hideMatching}
+              hideIgnored={hideIgnored}
             />
           </div>
           {/* Pinned below the scrollable listing (not sticky inside it) —
@@ -722,9 +785,11 @@ export function DirectoryComparisonExplorer() {
               onRenameDrop={(droppedOnName, draggedName) =>
                 renameViaDrop('right', droppedOnName, draggedName)
               }
+              onToggleIgnore={(name) => void toggleIgnore('right', name)}
               sortBy={sortBy}
               sortDir={sortDir}
               hideMatching={hideMatching}
+              hideIgnored={hideIgnored}
             />
           </div>
           {rightActivePath && (

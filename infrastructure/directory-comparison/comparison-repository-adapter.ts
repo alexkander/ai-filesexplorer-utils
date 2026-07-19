@@ -208,6 +208,15 @@ const deleteFilesInSubtreeStmt = db.prepare(`
   WHERE path = @path OR path LIKE @likePattern ESCAPE '\\'
 `);
 
+const isIgnoredStmt = db.prepare(`SELECT 1 FROM ignored_paths WHERE path = ?`);
+const setIgnoredStmt = db.prepare(`
+  INSERT INTO ignored_paths (path, ignored_at) VALUES (@path, @now)
+  ON CONFLICT(path) DO NOTHING
+`);
+const clearIgnoredStmt = db.prepare(
+  `DELETE FROM ignored_paths WHERE path = @path`,
+);
+
 export const comparisonRepositoryAdapter: ComparisonRepositoryPort = {
   upsertPendingDirectory(path, parentPath, depth) {
     upsertPendingDirectoryStmt.run({ path, parentPath, depth });
@@ -306,5 +315,17 @@ export const comparisonRepositoryAdapter: ComparisonRepositoryPort = {
     const likePattern = subtreeLikePattern(path);
     deleteFilesInSubtreeStmt.run({ path, likePattern });
     deleteDirNodesInSubtreeStmt.run({ path, likePattern });
+  },
+
+  isIgnored(path) {
+    return isIgnoredStmt.get(path) !== undefined;
+  },
+
+  setIgnored(path, ignored) {
+    if (ignored) {
+      setIgnoredStmt.run({ path, now: new Date().toISOString() });
+    } else {
+      clearIgnoredStmt.run({ path });
+    }
   },
 };

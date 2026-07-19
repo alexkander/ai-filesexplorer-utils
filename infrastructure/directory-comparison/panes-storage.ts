@@ -18,6 +18,9 @@ export interface PanesState {
   /** Shared by both panes — hides entries whose comparison status is
    * matching/matching_empty (user request). */
   hideMatching: boolean;
+  /** Shared by both panes — hides entries explicitly marked ignored (spec:
+   * user request, independent of hideMatching). */
+  hideIgnored: boolean;
 }
 
 const DEFAULT_STATE: PanesState = {
@@ -27,6 +30,7 @@ const DEFAULT_STATE: PanesState = {
   sortBy: 'name',
   sortDir: 'asc',
   hideMatching: false,
+  hideIgnored: false,
 };
 
 /**
@@ -50,6 +54,7 @@ export function loadPanes(): PanesState {
           : 'name',
       sortDir: parsed.sortDir === 'desc' ? 'desc' : 'asc',
       hideMatching: parsed.hideMatching === true,
+      hideIgnored: parsed.hideIgnored === true,
     };
   } catch {
     return DEFAULT_STATE;

@@ -9,6 +9,7 @@ export const COMPARISON_STATUS_COLORS: Record<EntryComparisonStatus, string> = {
   only_right: 'bg-amber-500',
   scanning: 'bg-blue-500',
   error: 'bg-red-700',
+  ignored: 'bg-black ring-2 ring-inset ring-gray-400 dark:ring-gray-500',
 };
 
 export const COMPARISON_STATUS_LABELS: Record<EntryComparisonStatus, string> = {
@@ -20,4 +21,5 @@ export const COMPARISON_STATUS_LABELS: Record<EntryComparisonStatus, string> = {
   only_right: 'Only on this side',
   scanning: 'Scanning…',
   error: 'Error',
+  ignored: 'Ignored',
 };

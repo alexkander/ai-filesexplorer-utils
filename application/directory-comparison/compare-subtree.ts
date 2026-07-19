@@ -16,7 +16,7 @@ import {
   deriveDirectoryChecksum,
   type ChildDescriptor,
 } from '@/domain/directory-comparison/derive-directory-checksum';
-import { getName } from '@/domain/scanning/path-info';
+import { getName, joinChildPath } from '@/domain/scanning/path-info';
 import type { ScanMode } from '@/domain/scanning/scan-stack';
 import { isEmptyDirectorySubtree } from './is-empty-directory-subtree';
 
@@ -55,6 +55,20 @@ export interface CompareSubtreeResult {
 
 const CANCELLED_RESULT: CompareSubtreeResult = {
   cancelled: true,
+  matching: false,
+  checksum: null,
+  leftHasError: false,
+  rightHasError: false,
+};
+
+// Ignored (spec: user request): neither matching nor mismatched — same
+// "excluded entirely" shape as CANCELLED_RESULT's non-cancelled sibling
+// would be, if there were one. Only reached if compareSubtree is ever
+// called directly on an ignored pair (the loop below already skips
+// recursing into one at all, so this is a defensive backstop for the
+// outermost call, which bypasses that loop).
+const IGNORED_RESULT: CompareSubtreeResult = {
+  cancelled: false,
   matching: false,
   checksum: null,
   leftHasError: false,
@@ -251,9 +265,16 @@ export async function compareSubtree(
   options: CompareSubtreeOptions,
 ): Promise<CompareSubtreeResult> {
   if (options.signal.aborted) return CANCELLED_RESULT;
-  options.onProgress?.(leftNode.path, rightNode.path);
 
   const { comparisonRepository, checksumPort } = deps;
+  if (
+    comparisonRepository.isIgnored(leftNode.path) ||
+    comparisonRepository.isIgnored(rightNode.path)
+  ) {
+    return IGNORED_RESULT;
+  }
+
+  options.onProgress?.(leftNode.path, rightNode.path);
 
   if (
     options.mode === 'incremental' &&
@@ -322,6 +343,19 @@ export async function compareSubtree(
 
   for (const pair of pairs) {
     if (options.signal.aborted) return CANCELLED_RESULT;
+
+    // Ignored (spec: user request): excluded entirely from allMatching and
+    // childDescriptors, same treatment as an empty-on-one-side directory
+    // below — neither breaks the parent's matching status nor recurses
+    // into it (which would be pointless anyway: Pass 1 never listed an
+    // ignored directory's own children in the first place).
+    const leftChildIgnored =
+      pair.left &&
+      comparisonRepository.isIgnored(joinChildPath(leftNode.path, pair.name));
+    const rightChildIgnored =
+      pair.right &&
+      comparisonRepository.isIgnored(joinChildPath(rightNode.path, pair.name));
+    if (leftChildIgnored || rightChildIgnored) continue;
 
     if (!pair.left || !pair.right) {
       const presentKind = (pair.left ?? pair.right)!.kind;

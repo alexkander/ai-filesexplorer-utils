@@ -41,6 +41,16 @@ db.exec(`
 
   CREATE INDEX IF NOT EXISTS idx_file_checksums_parent_path
     ON file_checksums (parent_path);
+
+  -- Exact paths the user has explicitly marked to skip during Compare
+  -- (spec: user request) — a row's mere presence means "ignored", so no
+  -- boolean column is needed. Deliberately keyed by exact path, not by
+  -- name: the same filename at a different parent is a different entry
+  -- and isn't ignored unless marked separately.
+  CREATE TABLE IF NOT EXISTS ignored_paths (
+    path TEXT PRIMARY KEY,
+    ignored_at TEXT NOT NULL
+  );
 `);
 
 // `CREATE TABLE IF NOT EXISTS` above doesn't add columns to a table that

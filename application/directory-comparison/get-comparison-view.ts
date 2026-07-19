@@ -10,10 +10,32 @@ import {
   type EntryComparisonStatus,
   type PairableEntry,
 } from '@/domain/directory-comparison/entry-comparison-result';
-import { getName, isWithinSubtree } from '@/domain/scanning/path-info';
+import {
+  getName,
+  getParentPath,
+  isWithinSubtree,
+  joinChildPath,
+} from '@/domain/scanning/path-info';
 import { isEmptyDirectorySubtree } from './is-empty-directory-subtree';
 
 export type PassActive = 'structural' | 'comparison' | null;
+
+// Compare button visibility (spec: user request): disabled not just when
+// leftPath/rightPath itself is ignored, but when ANY ancestor is — an
+// ignored directory's own children never get listed by Pass 1 at all (see
+// list-entries.ts), so starting a Compare scoped to one of them would
+// have nothing to work with.
+function isIgnoredOrAncestorIgnored(
+  path: string,
+  comparisonRepository: ComparisonRepositoryPort,
+): boolean {
+  let current: string | null = path;
+  while (current !== null) {
+    if (comparisonRepository.isIgnored(current)) return true;
+    current = getParentPath(current);
+  }
+  return false;
+}
 
 // Shared by each child pair (in the loop below) and by ownStatus (for
 // leftPath/rightPath themselves) — everything EXCEPT the "scanning" case,
@@ -91,6 +113,12 @@ export interface ComparisonView {
    * exact path. */
   leftSizeInfo: SizeInfo | null;
   rightSizeInfo: SizeInfo | null;
+  /** True when `leftPath`/`rightPath` (or any ancestor of either) is marked
+   * ignored (spec: user request) — Pass 1 never lists an ignored
+   * directory's children, so a Compare scoped underneath one would find
+   * nothing; the UI disables the Compare/Force full re-compare buttons
+   * whenever this is true. */
+  compareDisabled: boolean;
 }
 
 /**
@@ -171,14 +199,22 @@ export async function getComparisonView(
 
   const ownLeftNode = comparisonRepository.getNode(leftPath);
   const ownRightNode = comparisonRepository.getNode(rightPath);
-  const ownStatus: EntryComparisonStatus | null =
-    passActive !== null
+  const ownIgnored =
+    comparisonRepository.isIgnored(leftPath) ||
+    comparisonRepository.isIgnored(rightPath);
+  const ownStatus: EntryComparisonStatus | null = ownIgnored
+    ? 'ignored'
+    : passActive !== null
       ? 'scanning'
       : ownLeftNode && ownRightNode
         ? deriveDirectoryNodeStatus(ownLeftNode, ownRightNode)
         : null;
   const ownChecksum: string | null =
     ownStatus === 'matching' ? (ownLeftNode?.directoryChecksum ?? null) : null;
+
+  const compareDisabled =
+    isIgnoredOrAncestorIgnored(leftPath, comparisonRepository) ||
+    isIgnoredOrAncestorIgnored(rightPath, comparisonRepository);
 
   const leftSizeInfo = sizeInfoPort.getSizeInfo(leftPath);
   const rightSizeInfo = sizeInfoPort.getSizeInfo(rightPath);
@@ -204,6 +240,19 @@ export async function getComparisonView(
     const kind = (pair.left ?? pair.right)!.kind;
 
     const noChecksum = { leftChecksum: null, rightChecksum: null } as const;
+
+    // Ignored (spec: user request) takes precedence over every other
+    // status below — checked against whichever side(s) actually have an
+    // entry here (only_left/only_right pairs have nothing to check on the
+    // absent side).
+    const entryIgnored =
+      (pair.left &&
+        comparisonRepository.isIgnored(joinChildPath(leftPath, pair.name))) ||
+      (pair.right &&
+        comparisonRepository.isIgnored(joinChildPath(rightPath, pair.name)));
+    if (entryIgnored) {
+      return { name: pair.name, kind, status: 'ignored', ...noChecksum };
+    }
 
     if (!pair.left) {
       const rightNode = rightDirsByName.get(pair.name);
@@ -333,5 +382,6 @@ export async function getComparisonView(
     ownChecksum,
     leftSizeInfo,
     rightSizeInfo,
+    compareDisabled,
   };
 }

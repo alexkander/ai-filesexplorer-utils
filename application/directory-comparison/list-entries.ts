@@ -31,6 +31,21 @@ export async function listEntries(
   mode: ScanMode,
   doneSet?: ReadonlySet<string>,
 ): Promise<ListEntriesResult> {
+  // Ignored (spec: user request): skip listing this directory's children
+  // entirely — the whole point of marking something ignored is to spend no
+  // scan time on it, not just to hide it cosmetically. Recorded as 'done'
+  // with no unreadable entries so it doesn't linger as perpetually
+  // "not_compared"/pending from Pass 1's own bookkeeping perspective,
+  // though get-comparison-view.ts's `ignored` status override means this
+  // outcome is never actually read for display purposes either way.
+  if (comparisonRepository.isIgnored(path)) {
+    comparisonRepository.recordDirectoryOwnResult(path, {
+      outcome: 'done',
+      hasUnreadableEntries: false,
+    });
+    return { childPaths: [] };
+  }
+
   const outcome = await traverseDirectory(path, fileSystem, mode, doneSet);
 
   if (!outcome.ok) {

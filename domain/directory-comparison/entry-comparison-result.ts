@@ -11,7 +11,13 @@ export type EntryComparisonStatus =
   | 'only_left'
   | 'only_right'
   | 'scanning'
-  | 'error';
+  | 'error'
+  // Explicitly excluded from Compare (spec: user request, double-click the
+  // status dot) — takes precedence over whatever the normal pairing/
+  // checksum logic would otherwise conclude. Neither passes nor fails its
+  // parent's matching rollup; it's simply left out of consideration, same
+  // treatment as an empty-on-one-side directory.
+  | 'ignored';
 
 export interface EntryComparisonResult {
   name: string;
