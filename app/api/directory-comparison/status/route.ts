@@ -23,6 +23,7 @@ export async function GET(request: NextRequest) {
     comparisonPassWorker.getActivePath(),
     comparisonQueue.getActivePair(),
     countAndSizeReadonlyAdapter,
+    comparisonPassWorker.getProgress(),
   );
   return NextResponse.json(view);
 }

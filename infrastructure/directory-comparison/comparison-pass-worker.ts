@@ -1,4 +1,5 @@
 import { compareSubtree } from '@/application/directory-comparison/compare-subtree';
+import { countFilePairs } from '@/application/directory-comparison/count-file-pairs';
 import { comparisonRepositoryAdapter } from './comparison-repository-adapter';
 import { checksumAdapter } from './checksum-adapter';
 import { isWithinSubtree } from '@/domain/scanning/path-info';
@@ -12,6 +13,11 @@ export interface ActivePair {
 export interface ActivePath {
   left: string;
   right: string;
+}
+
+export interface ComparisonProgress {
+  processed: number;
+  total: number;
 }
 
 /**
@@ -31,6 +37,7 @@ class ComparisonPassWorker {
   private activePair: ActivePair | null = null;
   private activePath: ActivePath | null = null;
   private abortController: AbortController | null = null;
+  private progress: ComparisonProgress | null = null;
 
   async run(
     leftRoot: string,
@@ -46,6 +53,18 @@ class ComparisonPassWorker {
         comparisonRepositoryAdapter.getSubtree(rightRoot)[0];
       if (!leftRootNode || !rightRootNode) return;
 
+      // Computed once up front (spec: user request — "N of TOTAL" next to
+      // the active-path display) against whatever Pass 1 already listed;
+      // cheap relative to the actual hashing this pass is about to do.
+      this.progress = {
+        processed: 0,
+        total: countFilePairs(
+          leftRootNode,
+          rightRootNode,
+          comparisonRepositoryAdapter,
+        ),
+      };
+
       await compareSubtree(
         leftRootNode,
         rightRootNode,
@@ -59,12 +78,21 @@ class ComparisonPassWorker {
           onProgress: (left, right) => {
             this.activePath = { left, right };
           },
+          onFilePairResolved: (count) => {
+            if (this.progress) {
+              this.progress = {
+                ...this.progress,
+                processed: this.progress.processed + count,
+              };
+            }
+          },
         },
       );
     } finally {
       this.activePair = null;
       this.activePath = null;
       this.abortController = null;
+      this.progress = null;
     }
   }
 
@@ -92,6 +120,10 @@ class ComparisonPassWorker {
 
   getActivePath(): ActivePath | null {
     return this.activePath;
+  }
+
+  getProgress(): ComparisonProgress | null {
+    return this.progress;
   }
 }
 

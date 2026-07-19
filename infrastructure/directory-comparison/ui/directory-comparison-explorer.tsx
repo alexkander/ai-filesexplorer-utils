@@ -53,6 +53,16 @@ function toRelative(path: string, root: string): string {
   return root === '/' ? path.slice(1) : path.slice(root.length + 1);
 }
 
+/** "(123 of 4,322)" (spec: user request — shown next to the active-path
+ * text below each pane, in its own non-truncating element so a long path
+ * can never push it off-screen). */
+function formatProgress(progress: {
+  processed: number;
+  total: number;
+}): string {
+  return `(${progress.processed.toLocaleString()} of ${progress.total.toLocaleString()})`;
+}
+
 /** The active path for `side`, relative to the comparison's OWN root for
  * that side (`activePair`) — deliberately NOT relative to (or gated by)
  * whatever the pane currently displays, so it keeps showing even if the
@@ -86,10 +96,15 @@ function PaneOwnInfo({
   sizeInfo,
   checksum,
   status,
+  onToggleIgnore,
 }: {
   sizeInfo: SizeInfo | null | undefined;
   checksum: string | null | undefined;
   status: EntryComparisonStatus | null | undefined;
+  /** Called when the status dot is double-clicked (spec: user request,
+   * same toggle-ignore action ComparisonPane's own entry rows offer, now
+   * also reachable from the pane's own path in the breadcrumb header). */
+  onToggleIgnore?: () => void;
 }) {
   return (
     <span className="ml-auto flex shrink-0 items-center gap-2 text-xs text-muted-foreground">
@@ -115,11 +130,17 @@ function PaneOwnInfo({
       )}
       {status && (
         <span
+          onDoubleClick={onToggleIgnore}
           className={cn(
             'inline-block size-2.5 shrink-0 rounded-full',
+            onToggleIgnore && 'cursor-pointer',
             COMPARISON_STATUS_COLORS[status],
           )}
-          title={COMPARISON_STATUS_LABELS[status]}
+          title={
+            onToggleIgnore
+              ? `${COMPARISON_STATUS_LABELS[status]} (double-click to ${status === 'ignored' ? 'un-ignore' : 'ignore'})`
+              : COMPARISON_STATUS_LABELS[status]
+          }
         />
       )}
     </span>
@@ -469,6 +490,37 @@ export function DirectoryComparisonExplorer() {
     await refetch();
   };
 
+  // Same toggle-ignore action as toggleIgnore above, but for the PANE'S
+  // OWN current path (breadcrumb header's status dot, spec: user request)
+  // rather than a child entry's name — targets leftPath/rightPath directly
+  // instead of childPath(parent, name).
+  const toggleOwnIgnore = async (side: 'left' | 'right') => {
+    const currentlyIgnored = view?.ownStatus === 'ignored';
+    const nextIgnored = !currentlyIgnored;
+
+    const setIgnoredAt = async (targetPath: string) => {
+      const res = await fetch('/api/directory-comparison/ignore', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: targetPath, ignored: nextIgnored }),
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => null)) as {
+          error?: string;
+        } | null;
+        window.alert(
+          `Failed to ${nextIgnored ? 'ignore' : 'un-ignore'}: ${body?.error ?? res.statusText}`,
+        );
+      }
+    };
+
+    await setIgnoredAt(side === 'left' ? leftPath : rightPath);
+    if (moveSync) {
+      await setIgnoredAt(side === 'left' ? rightPath : leftPath);
+    }
+    await refetch();
+  };
+
   // Checksum-match search (spec: user request): among files that don't
   // match by name between the two panes, find ones whose content is
   // identical to some other mismatched file on the other side — evidence
@@ -713,6 +765,7 @@ export function DirectoryComparisonExplorer() {
               sizeInfo={view?.leftSizeInfo}
               checksum={view?.ownChecksum}
               status={view?.ownStatus}
+              onToggleIgnore={() => void toggleOwnIgnore('left')}
             />
           </div>
           <div className="flex-1 overflow-y-auto">
@@ -739,12 +792,16 @@ export function DirectoryComparisonExplorer() {
               stays visible regardless of scroll position without needing
               position: sticky. */}
           {leftActivePath && (
-            <p
-              className="truncate border-t bg-background px-2 py-1.5 font-mono text-xs text-blue-500"
-              title={leftActivePath}
-            >
-              {leftActivePath}
-            </p>
+            <div className="flex items-center gap-2 border-t bg-background px-2 py-1.5 font-mono text-xs text-blue-500">
+              <span className="min-w-0 flex-1 truncate" title={leftActivePath}>
+                {leftActivePath}
+              </span>
+              {view?.progress && (
+                <span className="shrink-0">
+                  {formatProgress(view.progress)}
+                </span>
+              )}
+            </div>
           )}
         </div>
         <div className="flex flex-col overflow-hidden">
@@ -774,6 +831,7 @@ export function DirectoryComparisonExplorer() {
               sizeInfo={view?.rightSizeInfo}
               checksum={view?.ownChecksum}
               status={view?.ownStatus}
+              onToggleIgnore={() => void toggleOwnIgnore('right')}
             />
           </div>
           <div className="flex-1 overflow-y-auto">
@@ -797,12 +855,16 @@ export function DirectoryComparisonExplorer() {
             />
           </div>
           {rightActivePath && (
-            <p
-              className="truncate border-t bg-background px-2 py-1.5 font-mono text-xs text-blue-500"
-              title={rightActivePath}
-            >
-              {rightActivePath}
-            </p>
+            <div className="flex items-center gap-2 border-t bg-background px-2 py-1.5 font-mono text-xs text-blue-500">
+              <span className="min-w-0 flex-1 truncate" title={rightActivePath}>
+                {rightActivePath}
+              </span>
+              {view?.progress && (
+                <span className="shrink-0">
+                  {formatProgress(view.progress)}
+                </span>
+              )}
+            </div>
           )}
         </div>
       </div>

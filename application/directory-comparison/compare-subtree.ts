@@ -19,6 +19,7 @@ import {
 import { getName, joinChildPath } from '@/domain/scanning/path-info';
 import type { ScanMode } from '@/domain/scanning/scan-stack';
 import { isEmptyDirectorySubtree } from './is-empty-directory-subtree';
+import { countFilePairs } from './count-file-pairs';
 
 export interface CompareSubtreeDeps {
   comparisonRepository: ComparisonRepositoryPort;
@@ -40,6 +41,15 @@ export interface CompareSubtreeOptions {
    * verification, since a single large/slow file gave no visible progress
    * otherwise) right before its content is actually read. */
   onProgress?: (leftPath: string, rightPath: string) => void;
+  /** Called with the number of file pairs just resolved — either 1 (a
+   * single file pair just finished comparing) or the bulk count of an
+   * entire subtree skipped via the incremental cache-hit shortcut below
+   * (spec: user request — a running "N of TOTAL" progress counter next to
+   * the active-path display). Never called for a pair excluded from
+   * consideration entirely (ignored, or a kind mismatch) — see
+   * count-file-pairs.ts, which computes the same "total" this is meant to
+   * count up to. */
+  onFilePairResolved?: (count: number) => void;
 }
 
 export interface CompareSubtreeResult {
@@ -286,6 +296,9 @@ export async function compareSubtree(
   ) {
     comparisonRepository.markSubtreeResolved(leftNode.path);
     comparisonRepository.markSubtreeResolved(rightNode.path);
+    options.onFilePairResolved?.(
+      countFilePairs(leftNode, rightNode, comparisonRepository),
+    );
     return {
       cancelled: false,
       matching: true,
@@ -413,6 +426,7 @@ export async function compareSubtree(
         options.onProgress,
       );
       if (result.verdict === 'cancelled') return CANCELLED_RESULT;
+      options.onFilePairResolved?.(1);
       leftHasError = leftHasError || result.leftError;
       rightHasError = rightHasError || result.rightError;
       if (result.verdict === 'matching' && result.checksum !== null) {

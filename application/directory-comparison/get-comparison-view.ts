@@ -119,6 +119,13 @@ export interface ComparisonView {
    * nothing; the UI disables the Compare/Force full re-compare buttons
    * whenever this is true. */
   compareDisabled: boolean;
+  /** How far Pass 2 has gotten through the active comparison's file pairs
+   * (spec: user request — "N of TOTAL" next to the active-path display).
+   * Not scoped to `leftPath`/`rightPath`, same rationale as `activePath`
+   * above — reflects the one comparison running anywhere in the tool
+   * (FR-010), regardless of what the panes currently show. `null` whenever
+   * no comparison pass is currently running. */
+  progress: { processed: number; total: number } | null;
 }
 
 /**
@@ -143,6 +150,7 @@ export async function getComparisonView(
   comparisonActivePath: { left: string; right: string } | null,
   activePair: { leftRoot: string; rightRoot: string } | null,
   sizeInfoPort: SizeInfoPort,
+  comparisonProgress: { processed: number; total: number } | null = null,
 ): Promise<ComparisonView> {
   // listChildrenNames, not listChildren — only name/kind are used below (to
   // pair entries by name), and listChildren's per-file stat() call for
@@ -383,5 +391,6 @@ export async function getComparisonView(
     leftSizeInfo,
     rightSizeInfo,
     compareDisabled,
+    progress: comparisonProgress,
   };
 }
