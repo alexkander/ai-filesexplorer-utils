@@ -12,6 +12,7 @@ import {
 } from '@/infrastructure/ui/components/dialog';
 import { cn } from '@/lib/utils';
 import type { RenamePlanStep } from '@/domain/directory-comparison/build-rename-plan';
+import type { ChecksumMatch } from '@/application/directory-comparison/find-checksum-matches';
 
 function displaySourceName(
   step: RenamePlanStep,
@@ -32,20 +33,28 @@ function displayDestinationName(
 }
 
 /**
- * Shows the result of the "checksum matches" search (spec: user request)
- * as an ordered, step-by-step rename PLAN rather than a flat list —
- * matches can chain into each other, or form a rename cycle (a straight
- * swap, or a longer loop), which can't be executed as independent
- * one-shot renames without clobbering data (see
- * domain/directory-comparison/build-rename-plan.ts). Each step is only
- * renameable once every step before it has actually completed — later
- * steps can depend on an earlier one's real runtime result (a
- * cycle-breaking backup's timestamped name isn't known ahead of time).
+ * Shows the "checksum matches" search's progress live (spec: user
+ * request) while it's still hashing — a plain, unordered list of matches
+ * discovered so far, growing as each one is found — then switches to the
+ * final, ordered step-by-step rename PLAN once hashing finishes. Matches
+ * can chain into each other, or form a rename cycle (a straight swap, or
+ * a longer loop), which can't be executed as independent one-shot
+ * renames without clobbering data (see
+ * domain/directory-comparison/build-rename-plan.ts) — sequencing them
+ * needs the COMPLETE set, which is why the ordered plan can only be shown
+ * once searching is done, not progressively like the raw matches. Each
+ * step is only renameable once every step before it has actually
+ * completed — later steps can depend on an earlier one's real runtime
+ * result (a cycle-breaking backup's timestamped name isn't known ahead
+ * of time).
  */
 export function ChecksumMatchModal({
   open,
   onOpenChange,
-  loading,
+  searching,
+  hashed,
+  total,
+  matchesSoFar,
   plan,
   completedThrough,
   stepResults,
@@ -55,7 +64,14 @@ export function ChecksumMatchModal({
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  loading: boolean;
+  /** True while the search is still hashing files server-side — `plan` is
+   * only meaningful once this goes false. */
+  searching: boolean;
+  hashed: number;
+  total: number;
+  /** Raw matches discovered so far, in whatever order they turned up —
+   * shown live while `searching`. */
+  matchesSoFar: ChecksumMatch[];
   plan: RenamePlanStep[];
   /** Index (into `plan`) of the last step that has actually completed;
    * `-1` before anything has run. Step `completedThrough + 1` is the only
@@ -90,11 +106,27 @@ export function ChecksumMatchModal({
           </DialogDescription>
         </DialogHeader>
 
-        {loading ? (
-          <div className="flex items-center justify-center gap-2 py-8 text-sm text-muted-foreground">
-            <Loader2 className="size-4 animate-spin" aria-hidden="true" />
-            Searching…
-          </div>
+        {searching ? (
+          <>
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+              Hashing {hashed.toLocaleString()} of {total.toLocaleString()}…
+            </div>
+            {matchesSoFar.length > 0 && (
+              <ul className="flex max-h-96 flex-col gap-2 overflow-y-auto">
+                {matchesSoFar.map((match) => (
+                  <li
+                    key={match.checksum}
+                    className="rounded-md border p-2 text-sm"
+                  >
+                    <span className="font-mono">{match.leftName}</span>
+                    <span className="text-muted-foreground"> {'=>'} </span>
+                    <span className="font-mono">{match.rightName}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </>
         ) : plan.length === 0 ? (
           <p className="py-8 text-center text-sm text-muted-foreground">
             No content matches found among the mismatched files.
@@ -162,7 +194,12 @@ export function ChecksumMatchModal({
         <DialogFooter className="justify-between sm:justify-between">
           <Button
             variant="secondary"
-            disabled={plan.length === 0 || allDone || executingIndex !== null}
+            disabled={
+              searching ||
+              plan.length === 0 ||
+              allDone ||
+              executingIndex !== null
+            }
             onClick={onRenameAll}
           >
             {executingIndex !== null ? (

@@ -109,6 +109,28 @@ export interface ComparisonRepositoryPort {
   // listing them all), most-recently-ignored first.
   listIgnoredPaths(): { path: string; ignoredAt: string }[];
 
+  // Unreliable-size log (spec: user request) — Pass 1 calls this whenever a
+  // file's filesystem-reported size was corrected from a false 0 (see
+  // RawEntry.sizeWasCorrected), purely so the user can review which files
+  // hit the quirk. Re-detecting an already-logged path refreshes its size
+  // (in case the file's real content changed) without disturbing when it was
+  // first detected. Never read by any comparison logic.
+  recordUnreliableSizeFile(path: string, size: number): void;
+  // User-triggered removal from the log (mirrors setIgnored's un-ignore) —
+  // purely housekeeping, has no effect on Compare.
+  clearUnreliableSizeFile(path: string): void;
+  // Every currently-logged path, most-recently-detected first.
+  listUnreliableSizeFiles(): {
+    path: string;
+    size: number;
+    detectedAt: string;
+  }[];
+  // Cheap single-row lookup (mirrors isIgnored) — used by the directory
+  // listing (spec: user request) to flag an individual file's row with a
+  // "touched by Google's office suite" indicator, without fetching the
+  // whole log just to check one path.
+  isUnreliableSizeFile(path: string): boolean;
+
   // Pass 2 only, `mode: 'incremental'` cache-hit shortcut: `isCacheStillValid`
   // already confirmed (recursively) that every directory in this subtree has
   // a non-null checksum and every file/subdirectory under it is still fresh

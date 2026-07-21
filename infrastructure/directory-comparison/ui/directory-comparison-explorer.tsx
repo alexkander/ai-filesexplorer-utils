@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { FolderUp } from 'lucide-react';
 import { Button } from '@/infrastructure/ui/components/button';
@@ -9,6 +9,7 @@ import { ComparisonPane } from './comparison-pane';
 import { ComparisonStatusPanel } from './comparison-status-panel';
 import { ChecksumMatchModal } from './checksum-match-modal';
 import type { RenamePlanStep } from '@/domain/directory-comparison/build-rename-plan';
+import type { ChecksumMatch } from '@/application/directory-comparison/find-checksum-matches';
 import {
   useComparisonStatus,
   type ComparisonView,
@@ -218,7 +219,19 @@ export function DirectoryComparisonExplorer() {
   const [rightRefreshToken, setRightRefreshToken] = useState(0);
 
   const [checksumModalOpen, setChecksumModalOpen] = useState(false);
-  const [checksumMatchesLoading, setChecksumMatchesLoading] = useState(false);
+  // Lets the status-polling loop below stop making requests once the
+  // modal's been closed, without needing to restructure it as an effect —
+  // a plain state read would only reflect the render the loop started in.
+  const checksumModalOpenRef = useRef(false);
+  useEffect(() => {
+    checksumModalOpenRef.current = checksumModalOpen;
+  }, [checksumModalOpen]);
+  const [checksumSearching, setChecksumSearching] = useState(false);
+  const [checksumHashed, setChecksumHashed] = useState(0);
+  const [checksumTotal, setChecksumTotal] = useState(0);
+  const [checksumMatchesSoFar, setChecksumMatchesSoFar] = useState<
+    ChecksumMatch[]
+  >([]);
   const [checksumPlan, setChecksumPlan] = useState<RenamePlanStep[]>([]);
   // Parallel to checksumPlan — the REAL name each completed step actually
   // produced (a backup step's real timestamped name, or a normal step's
@@ -524,33 +537,70 @@ export function DirectoryComparisonExplorer() {
   // Checksum-match search (spec: user request): among files that don't
   // match by name between the two panes, find ones whose content is
   // identical to some other mismatched file on the other side — evidence
-  // of a rename — and offer a step-by-step plan to rename the LEFT side's
-  // files to match. Matches can chain into each other or form a rename
-  // cycle (a straight swap, or a longer loop) — the backend's
-  // build-rename-plan.ts already sequences that into safe, ordered atomic
-  // steps; this component just executes them in order.
+  // of a rename. Runs as a background worker (same shape as Compare
+  // itself) so results can show up progressively as they're found rather
+  // than only once every candidate file has been hashed — this component
+  // polls its status every 500ms while it's running. Once hashing
+  // finishes, the backend's build-rename-plan.ts sequences the complete
+  // set of matches into a safe, ordered, step-by-step rename plan
+  // (matches can chain into each other or form a rename cycle, which
+  // can't be shown as independent steps until the whole set is known) —
+  // this component then executes those steps in order.
   const findChecksumMatches = async () => {
     setChecksumModalOpen(true);
-    setChecksumMatchesLoading(true);
+    checksumModalOpenRef.current = true;
+    setChecksumSearching(true);
+    setChecksumHashed(0);
+    setChecksumTotal(0);
+    setChecksumMatchesSoFar([]);
     setChecksumPlan([]);
     setChecksumStepResults([]);
     setChecksumCompletedThrough(-1);
-    try {
-      const res = await fetch('/api/directory-comparison/checksum-matches', {
+
+    const startRes = await fetch(
+      '/api/directory-comparison/checksum-matches/start',
+      {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ leftPath, rightPath }),
-      });
-      if (!res.ok) {
-        window.alert('Searching for checksum matches failed.');
-        setChecksumModalOpen(false);
+      },
+    );
+    if (!startRes.ok) {
+      window.alert('Searching for checksum matches failed.');
+      setChecksumModalOpen(false);
+      setChecksumSearching(false);
+      return;
+    }
+
+    for (;;) {
+      if (!checksumModalOpenRef.current) return;
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      if (!checksumModalOpenRef.current) return;
+
+      const statusRes = await fetch(
+        '/api/directory-comparison/checksum-matches/status',
+      );
+      if (!statusRes.ok) {
+        setChecksumSearching(false);
         return;
       }
-      const body = (await res.json()) as { plan: RenamePlanStep[] };
-      setChecksumPlan(body.plan);
-      setChecksumStepResults(body.plan.map(() => null));
-    } finally {
-      setChecksumMatchesLoading(false);
+      const status = (await statusRes.json()) as {
+        running: boolean;
+        hashed: number;
+        total: number;
+        matches: ChecksumMatch[];
+        plan: RenamePlanStep[] | null;
+      };
+      setChecksumHashed(status.hashed);
+      setChecksumTotal(status.total);
+      setChecksumMatchesSoFar(status.matches);
+
+      if (!status.running) {
+        setChecksumPlan(status.plan ?? []);
+        setChecksumStepResults((status.plan ?? []).map(() => null));
+        setChecksumSearching(false);
+        return;
+      }
     }
   };
 
@@ -727,6 +777,11 @@ export function DirectoryComparisonExplorer() {
           <Button variant="outline" size="sm" asChild>
             <Link href="/directory-comparison/ignored">Ignored paths</Link>
           </Button>
+          <Button variant="outline" size="sm" asChild>
+            <Link href="/directory-comparison/unreliable-size-files">
+              Google-touched files
+            </Link>
+          </Button>
         </div>
         <ComparisonStatusPanel
           view={view}
@@ -870,8 +925,14 @@ export function DirectoryComparisonExplorer() {
       </div>
       <ChecksumMatchModal
         open={checksumModalOpen}
-        onOpenChange={setChecksumModalOpen}
-        loading={checksumMatchesLoading}
+        onOpenChange={(open) => {
+          checksumModalOpenRef.current = open;
+          setChecksumModalOpen(open);
+        }}
+        searching={checksumSearching}
+        hashed={checksumHashed}
+        total={checksumTotal}
+        matchesSoFar={checksumMatchesSoFar}
         plan={checksumPlan}
         completedThrough={checksumCompletedThrough}
         stepResults={checksumStepResults}

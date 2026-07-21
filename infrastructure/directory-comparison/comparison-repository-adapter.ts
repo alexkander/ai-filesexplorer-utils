@@ -220,6 +220,21 @@ const listIgnoredPathsStmt = db.prepare(
   `SELECT path, ignored_at FROM ignored_paths ORDER BY ignored_at DESC`,
 );
 
+const recordUnreliableSizeFileStmt = db.prepare(`
+  INSERT INTO unreliable_size_files (path, size, detected_at)
+  VALUES (@path, @size, @now)
+  ON CONFLICT(path) DO UPDATE SET size = excluded.size
+`);
+const clearUnreliableSizeFileStmt = db.prepare(
+  `DELETE FROM unreliable_size_files WHERE path = @path`,
+);
+const listUnreliableSizeFilesStmt = db.prepare(
+  `SELECT path, size, detected_at FROM unreliable_size_files ORDER BY detected_at DESC`,
+);
+const isUnreliableSizeFileStmt = db.prepare(
+  `SELECT 1 FROM unreliable_size_files WHERE path = ?`,
+);
+
 export const comparisonRepositoryAdapter: ComparisonRepositoryPort = {
   upsertPendingDirectory(path, parentPath, depth) {
     upsertPendingDirectoryStmt.run({ path, parentPath, depth });
@@ -338,5 +353,34 @@ export const comparisonRepositoryAdapter: ComparisonRepositoryPort = {
       ignored_at: string;
     }[];
     return rows.map((r) => ({ path: r.path, ignoredAt: r.ignored_at }));
+  },
+
+  recordUnreliableSizeFile(path, size) {
+    recordUnreliableSizeFileStmt.run({
+      path,
+      size,
+      now: new Date().toISOString(),
+    });
+  },
+
+  clearUnreliableSizeFile(path) {
+    clearUnreliableSizeFileStmt.run({ path });
+  },
+
+  listUnreliableSizeFiles() {
+    const rows = listUnreliableSizeFilesStmt.all() as {
+      path: string;
+      size: number;
+      detected_at: string;
+    }[];
+    return rows.map((r) => ({
+      path: r.path,
+      size: r.size,
+      detectedAt: r.detected_at,
+    }));
+  },
+
+  isUnreliableSizeFile(path) {
+    return isUnreliableSizeFileStmt.get(path) !== undefined;
   },
 };

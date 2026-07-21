@@ -24,6 +24,7 @@ import {
 } from './comparison-status-colors';
 import { humanizeSize, exactBytesLabel } from './format-size';
 import { dragMimeType, otherSide } from './drag-mime-types';
+import { GoogleIcon } from './google-icon';
 
 const PAGE_SIZE = 200;
 
@@ -542,11 +543,19 @@ export function ComparisonPane({
                 </>
               ) : (
                 <>
-                  <File
-                    className="size-4 shrink-0 text-muted-foreground"
-                    fill="currentColor"
-                    aria-hidden="true"
-                  />
+                  {entry.hasUnreliableSize ? (
+                    <GoogleIcon
+                      className="size-4 shrink-0"
+                      role="img"
+                      aria-label="Touched by Google's office suite — may show false differences in Compare"
+                    />
+                  ) : (
+                    <File
+                      className="size-4 shrink-0 text-muted-foreground"
+                      fill="currentColor"
+                      aria-hidden="true"
+                    />
+                  )}
                   <span
                     className={cn(
                       'min-w-0 flex-1 truncate',

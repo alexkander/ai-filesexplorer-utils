@@ -51,6 +51,20 @@ db.exec(`
     path TEXT PRIMARY KEY,
     ignored_at TEXT NOT NULL
   );
+
+  -- Files Pass 1 caught with an unreliable filesystem-reported size (spec:
+  -- user request) — a known quirk of some network mounts (e.g. rclone's
+  -- Google Drive mount, for Office files edited in Drive's browser
+  -- "compatibility mode": Drive's API reports no size at all for those,
+  -- which surfaces as a false 0 via fs.stat). A row here is purely a log for
+  -- the user to review later — Pass 1 already uses the corrected size
+  -- (research.md's size-first cascade is unaffected), so nothing reads this
+  -- table to make comparison decisions.
+  CREATE TABLE IF NOT EXISTS unreliable_size_files (
+    path TEXT PRIMARY KEY,
+    size INTEGER NOT NULL,
+    detected_at TEXT NOT NULL
+  );
 `);
 
 // `CREATE TABLE IF NOT EXISTS` above doesn't add columns to a table that

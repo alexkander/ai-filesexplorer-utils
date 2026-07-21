@@ -1,6 +1,4 @@
 import type { EntryComparisonResult } from '@/domain/directory-comparison/entry-comparison-result';
-import { joinChildPath } from '@/domain/scanning/path-info';
-import type { ChecksumPort } from './checksum-port';
 
 const MATCHING_STATUSES = new Set(['matching', 'matching_empty']);
 
@@ -13,9 +11,9 @@ export interface ChecksumMatch {
 /** Every file name currently present on the left, derived from `entries`
  * (which pairs by name across both sides — any entry not `only_right` has
  * a left-side file) rather than a fresh directory listing, so it stays
- * consistent with whatever set of names `findChecksumMatches` itself
- * reasoned about. Used by `build-rename-plan.ts` to detect when a rename
- * chain's final destination collides with some file outside the plan. */
+ * consistent with whatever set of names this feature reasoned about. Used
+ * by `build-rename-plan.ts` to detect when a rename chain's final
+ * destination collides with some file outside the plan. */
 export function leftFileNamesFromEntries(
   entries: EntryComparisonResult[],
 ): Set<string> {
@@ -26,58 +24,19 @@ export function leftFileNamesFromEntries(
   );
 }
 
-async function hashByName(
-  parentPath: string,
-  names: string[],
-  checksumPort: ChecksumPort,
-): Promise<Map<string, string[]>> {
-  const byChecksum = new Map<string, string[]>();
-  for (const name of names) {
-    let checksum: string;
-    try {
-      checksum = await checksumPort.computeFullChecksum(
-        joinChildPath(parentPath, name),
-      );
-    } catch {
-      // Unreadable file — excluded from matching rather than surfaced as
-      // an error; this is a best-effort discovery tool, not a scan.
-      continue;
-    }
-    const existing = byChecksum.get(checksum);
-    if (existing) existing.push(name);
-    else byChecksum.set(checksum, [name]);
-  }
-  return byChecksum;
-}
-
 /**
- * Cross-matches by CONTENT, ignoring filename (spec: user request): among
- * files that don't already fully match by name+content between leftPath
- * and rightPath, hashes each one live and looks for the same checksum
- * appearing on both sides under different names — evidence of a rename.
- *
- * Deliberately scoped to `entries` (this pane pair's `ComparisonView`,
- * same data `ComparisonPane` already renders) rather than a fresh
- * directory listing — never re-hashes a file the existing comparison has
- * already confirmed `matching`/`matching_empty`, which keeps this bounded
- * on a large, mostly-identical pair of directories instead of re-reading
- * everything on every click.
- *
- * When a checksum has more than one candidate name on a side (duplicate
- * content under different names), only the alphabetically-first name is
- * used (spec: user request) — the rest are left untouched.
- *
- * Sequencing these into actually-safe, individually-executable rename
- * steps (handling the case where matches chain into each other, or form a
- * rename cycle/swap) is `build-rename-plan.ts`'s job, not this one — this
- * only discovers WHICH names correspond by content.
+ * Which file names actually need hashing (spec: user request — never
+ * re-hashes a file the existing comparison has already confirmed
+ * `matching`/`matching_empty`, keeping this bounded on a large,
+ * mostly-identical pair of directories instead of re-reading everything
+ * on every click). A name can appear in both lists (same-named pair whose
+ * content differs — `differs`/`not_compared`/etc.) since each side's own
+ * file still needs its own hash.
  */
-export async function findChecksumMatches(
-  leftPath: string,
-  rightPath: string,
-  entries: EntryComparisonResult[],
-  checksumPort: ChecksumPort,
-): Promise<ChecksumMatch[]> {
+export function getCandidateNames(entries: EntryComparisonResult[]): {
+  leftNames: string[];
+  rightNames: string[];
+} {
   const leftNames: string[] = [];
   const rightNames: string[] = [];
 
@@ -88,26 +47,52 @@ export async function findChecksumMatches(
     if (entry.status !== 'only_left') rightNames.push(entry.name);
   }
 
-  const [leftByChecksum, rightByChecksum] = await Promise.all([
-    hashByName(leftPath, leftNames, checksumPort),
-    hashByName(rightPath, rightNames, checksumPort),
-  ]);
+  return { leftNames, rightNames };
+}
 
-  const matches: ChecksumMatch[] = [];
-  for (const [checksum, candidateLeftNames] of leftByChecksum) {
-    const candidateRightNames = rightByChecksum.get(checksum);
-    if (!candidateRightNames) continue;
+/**
+ * Folds one just-hashed name into the running per-side checksum maps and
+ * (spec: user request — incremental discovery) updates `matchByChecksum`
+ * the moment its checksum is known to appear on BOTH sides — called once
+ * per file, in whatever order each side happens to get hashed in, so a
+ * match can surface as soon as its second half is found rather than only
+ * once every file on both sides has been processed.
+ *
+ * When a checksum has more than one candidate name on a side (duplicate
+ * content under different names), only the alphabetically-first name is
+ * used (spec: user request) — re-derived from scratch on every call so a
+ * match already recorded gets corrected in place if a later, earlier-
+ * sorting name for the same checksum turns up on either side.
+ */
+export function recordHashedName(
+  side: 'left' | 'right',
+  name: string,
+  checksum: string,
+  ownByChecksum: Map<string, string[]>,
+  otherByChecksum: Map<string, string[]>,
+  matchByChecksum: Map<string, ChecksumMatch>,
+): void {
+  const ownNames = ownByChecksum.get(checksum);
+  if (ownNames) ownNames.push(name);
+  else ownByChecksum.set(checksum, [name]);
 
-    const leftName = [...candidateLeftNames].sort((a, b) =>
-      a.localeCompare(b),
-    )[0];
-    const rightName = [...candidateRightNames].sort((a, b) =>
-      a.localeCompare(b),
-    )[0];
-    if (leftName === rightName) continue;
+  const otherNames = otherByChecksum.get(checksum);
+  if (!otherNames || otherNames.length === 0) return;
 
-    matches.push({ checksum, leftName, rightName });
+  const ownBest = [...ownByChecksum.get(checksum)!].sort((a, b) =>
+    a.localeCompare(b),
+  )[0];
+  const otherBest = [...otherNames].sort((a, b) => a.localeCompare(b))[0];
+  const leftName = side === 'left' ? ownBest : otherBest;
+  const rightName = side === 'left' ? otherBest : ownBest;
+
+  if (leftName === rightName) {
+    matchByChecksum.delete(checksum);
+    return;
   }
+  matchByChecksum.set(checksum, { checksum, leftName, rightName });
+}
 
-  return matches.sort((a, b) => a.leftName.localeCompare(b.leftName));
+export function sortMatches(matches: ChecksumMatch[]): ChecksumMatch[] {
+  return [...matches].sort((a, b) => a.leftName.localeCompare(b.leftName));
 }

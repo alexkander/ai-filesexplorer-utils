@@ -6,6 +6,7 @@ import {
 } from '@/application/directory-comparison/list-directory';
 import { filesystemAdapter } from '@/infrastructure/scanning/filesystem-adapter';
 import { countAndSizeReadonlyAdapter } from '@/infrastructure/directory-comparison/count-and-size-readonly-adapter';
+import { comparisonRepositoryAdapter } from '@/infrastructure/directory-comparison/comparison-repository-adapter';
 
 const DEFAULT_LIMIT = 200;
 const SORT_BY_VALUES: SortBy[] = ['name', 'type', 'size', 'count'];
@@ -35,6 +36,7 @@ export async function GET(request: NextRequest) {
     sortDir,
     filesystemAdapter,
     countAndSizeReadonlyAdapter,
+    comparisonRepositoryAdapter,
   );
 
   if (!outcome.ok) {

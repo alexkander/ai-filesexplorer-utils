@@ -1,17 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getComparisonView } from '@/application/directory-comparison/get-comparison-view';
 import {
-  findChecksumMatches,
+  getCandidateNames,
   leftFileNamesFromEntries,
 } from '@/application/directory-comparison/find-checksum-matches';
-import { buildRenamePlan } from '@/domain/directory-comparison/build-rename-plan';
 import { filesystemAdapter } from '@/infrastructure/scanning/filesystem-adapter';
 import { comparisonRepositoryAdapter } from '@/infrastructure/directory-comparison/comparison-repository-adapter';
 import { structuralScanWorker } from '@/infrastructure/directory-comparison/structural-scan-worker';
 import { comparisonPassWorker } from '@/infrastructure/directory-comparison/comparison-pass-worker';
 import { comparisonQueue } from '@/infrastructure/directory-comparison/comparison-queue';
 import { countAndSizeReadonlyAdapter } from '@/infrastructure/directory-comparison/count-and-size-readonly-adapter';
-import { checksumAdapter } from '@/infrastructure/directory-comparison/checksum-adapter';
+import { checksumMatchWorker } from '@/infrastructure/directory-comparison/checksum-match-worker';
 
 export async function POST(request: NextRequest) {
   const body = (await request.json()) as {
@@ -36,14 +35,14 @@ export async function POST(request: NextRequest) {
     countAndSizeReadonlyAdapter,
   );
 
-  const matches = await findChecksumMatches(
+  const { leftNames, rightNames } = getCandidateNames(view.entries);
+  checksumMatchWorker.start(
     body.leftPath,
     body.rightPath,
-    view.entries,
-    checksumAdapter,
+    leftNames,
+    rightNames,
+    leftFileNamesFromEntries(view.entries),
   );
 
-  const plan = buildRenamePlan(matches, leftFileNamesFromEntries(view.entries));
-
-  return NextResponse.json({ plan });
+  return NextResponse.json({ accepted: true }, { status: 202 });
 }

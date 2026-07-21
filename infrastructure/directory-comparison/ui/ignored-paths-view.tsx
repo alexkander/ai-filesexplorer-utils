@@ -86,7 +86,7 @@ export function IgnoredPathsView() {
   };
 
   return (
-    <div className="mx-auto flex max-w-3xl flex-col gap-4 p-6">
+    <div className="flex w-full flex-col gap-4 p-6">
       <div className="flex items-center gap-3">
         <Button variant="outline" size="sm" asChild>
           <Link href="/directory-comparison">

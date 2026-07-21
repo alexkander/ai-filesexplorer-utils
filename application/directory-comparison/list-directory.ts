@@ -15,11 +15,26 @@ const TYPE_ORDER: Record<EntryKind, number> = {
   unreadable: 3,
 };
 
+/** Narrow shape (satisfied structurally by ComparisonRepositoryPort) so this
+ * pane-listing module doesn't have to depend on the whole comparison
+ * repository just to flag one file property. */
+export interface UnreliableSizeLookupPort {
+  isUnreliableSizeFile(path: string): boolean;
+}
+
 export interface ListedEntry {
   name: string;
   type: EntryKind;
   /** Files only — the entry's own size in bytes. */
   size?: number;
+  /** Files only, `true` iff this exact path is logged in the unreliable-size
+   * registry (spec: user request) — i.e. has been touched by Google's
+   * office suite ("compatibility mode") at some point, so Drive may re-serve
+   * it with a non-deterministically repackaged container on every download.
+   * Surfaced so the UI can flag it distinctly instead of the plain file
+   * icon. `undefined` when `unreliableSizePort` wasn't given, same
+   * omit-rather-than-false convention as `sizeInfo`. */
+  hasUnreliableSize?: boolean;
   /** Directories only, and only when Count and Size has scanned this exact
    * path — read-only overlay from that tool's own database (spec FR-019,
    * user request). `undefined` (not just an absent count) when no data
@@ -60,6 +75,7 @@ export async function listDirectory(
   sortDir: SortDir,
   fileSystem: FileSystemPort,
   sizeInfoPort?: SizeInfoPort,
+  unreliableSizePort?: UnreliableSizeLookupPort,
 ): Promise<ListDirectoryOutcome> {
   const outcome = await fileSystem.listChildren(targetPath);
   if (!outcome.ok) return { ok: false, reason: outcome.reason };
@@ -108,7 +124,12 @@ export async function listDirectory(
 
   const entries: ListedEntry[] = page.map((entry) => {
     if (entry.kind === 'file') {
-      return { name: entry.name, type: 'file', size: entry.size };
+      return {
+        name: entry.name,
+        type: 'file',
+        size: entry.size,
+        hasUnreliableSize: unreliableSizePort?.isUnreliableSizeFile(entry.path),
+      };
     }
     const sizeInfo = getSizeInfo(entry);
     return {

@@ -1,6 +1,7 @@
 import { createReadStream } from 'fs';
 import { createHash } from 'crypto';
 import type { ChecksumPort } from '@/application/directory-comparison/checksum-port';
+import { computeOfficeContainerChecksum } from './office-container-checksum';
 
 const PARTIAL_CHECKSUM_BYTES = 64 * 1024;
 
@@ -51,4 +52,5 @@ function computePartialChecksum(
 export const checksumAdapter: ChecksumPort = {
   computePartialChecksum,
   computeFullChecksum,
+  computeOfficeContainerChecksum,
 };
