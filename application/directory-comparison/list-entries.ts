@@ -2,6 +2,7 @@ import type { FileSystemPort } from '@/application/scanning/filesystem-port';
 import type { ComparisonRepositoryPort } from './comparison-repository-port';
 import { traverseDirectory } from '@/application/scanning/traverse-directory';
 import { getDepth } from '@/domain/scanning/path-info';
+import { isOfficeContainerFormat } from '@/domain/directory-comparison/office-container-format';
 import type { ScanMode } from '@/domain/scanning/scan-stack';
 
 export interface ListEntriesResult {
@@ -75,6 +76,22 @@ export async function listEntries(
         entry.size,
         entry.modificationTime ?? new Date(0).toISOString(),
       );
+      // Google-touched-files registry (spec: user request): every Compare/
+      // Full compare relists unconditionally (see docstring above), so this
+      // re-evaluates on every press — an Office file reporting a
+      // filesystem size of 0 goes on the list (a known quirk of Office
+      // files touched by Google's editor, see office-container-format.ts);
+      // one that now reads a real size comes back off it, in case whatever
+      // caused the 0 (a cold rclone cache, a transient mount hiccup) has
+      // since resolved. `clearUnreliableSizeFile` is a no-op if the path
+      // was never listed, so this doesn't need to check membership first.
+      if (isOfficeContainerFormat(entry.path)) {
+        if (entry.size === 0) {
+          comparisonRepository.recordUnreliableSizeFile(entry.path, 0);
+        } else {
+          comparisonRepository.clearUnreliableSizeFile(entry.path);
+        }
+      }
     }
   }
 
