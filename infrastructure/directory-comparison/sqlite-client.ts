@@ -1,19 +1,23 @@
 import Database from 'better-sqlite3';
-import fs from 'fs';
 import path from 'path';
+import {
+  openWalDatabase,
+  retryWhileBusy,
+} from '@/infrastructure/sqlite/open-database';
 
 // Overridable so ad-hoc/manual verification runs can point at a throwaway
 // database instead of ever touching the real one at the default path.
 const dbPath =
   process.env.DIRECTORY_COMPARISON_DB_PATH ||
   path.join(process.cwd(), 'data', 'directory-comparison.sqlite');
-fs.mkdirSync(path.dirname(dbPath), { recursive: true });
 
-export const db: Database.Database = new Database(dbPath);
+// Opened (and its schema created) through the busy-tolerant helpers: this
+// module is evaluated concurrently by several of `next build`'s page-data
+// workers, all racing on the same file — see open-database.ts.
+export const db: Database.Database = openWalDatabase(dbPath);
 
-db.pragma('journal_mode = WAL');
-
-db.exec(`
+retryWhileBusy(() =>
+  db.exec(`
   CREATE TABLE IF NOT EXISTS directory_comparison_nodes (
     path TEXT PRIMARY KEY,
     parent_path TEXT,
@@ -65,14 +69,17 @@ db.exec(`
     size INTEGER NOT NULL,
     detected_at TEXT NOT NULL
   );
-`);
+`),
+);
 
 // `CREATE TABLE IF NOT EXISTS` above doesn't add columns to a table that
 // already existed before this field was introduced — migrate it separately,
 // ignoring the "duplicate column" error on every run after the first.
 try {
-  db.exec(
-    `ALTER TABLE directory_comparison_nodes ADD COLUMN resolved_by_pass2 INTEGER NOT NULL DEFAULT 0`,
+  retryWhileBusy(() =>
+    db.exec(
+      `ALTER TABLE directory_comparison_nodes ADD COLUMN resolved_by_pass2 INTEGER NOT NULL DEFAULT 0`,
+    ),
   );
 } catch (error) {
   if (

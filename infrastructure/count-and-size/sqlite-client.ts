@@ -1,19 +1,23 @@
 import Database from 'better-sqlite3';
-import fs from 'fs';
 import path from 'path';
+import {
+  openWalDatabase,
+  retryWhileBusy,
+} from '@/infrastructure/sqlite/open-database';
 
 // Overridable so ad-hoc/manual verification runs can point at a throwaway
 // database instead of ever touching the real one at the default path.
 const dbPath =
   process.env.COUNT_AND_SIZE_DB_PATH ||
   path.join(process.cwd(), 'data', 'count-and-size.sqlite');
-fs.mkdirSync(path.dirname(dbPath), { recursive: true });
 
-export const db: Database.Database = new Database(dbPath);
+// Opened (and its schema created) through the busy-tolerant helpers: this
+// module is evaluated concurrently by several of `next build`'s page-data
+// workers, all racing on the same file — see open-database.ts.
+export const db: Database.Database = openWalDatabase(dbPath);
 
-db.pragma('journal_mode = WAL');
-
-db.exec(`
+retryWhileBusy(() =>
+  db.exec(`
   CREATE TABLE IF NOT EXISTS directory_scan_nodes (
     path TEXT PRIMARY KEY,
     parent_path TEXT,
@@ -28,4 +32,5 @@ db.exec(`
 
   CREATE INDEX IF NOT EXISTS idx_directory_scan_nodes_parent_path
     ON directory_scan_nodes (parent_path);
-`);
+`),
+);
