@@ -71,9 +71,11 @@ checksum cache (SC-009), so rows survive a new scan of a different root.
 | `has_read_error`    | INTEGER NOT NULL DEFAULT 0 | Set when a read failed; excluded from grouping and from folder candidacy                                                                |
 | `scan_seq`          | INTEGER NOT NULL           | Which scan last observed this path; indexed                                                                                             |
 
-Indexes: `(parent_path)`, `(scan_seq, size)` — the latter serves phase 2's
-`GROUP BY size HAVING COUNT(*) > 1` directly — and `(scan_seq, full_checksum)`
-for phase 4's grouping.
+Indexes: `(parent_path, scan_seq)` — both columns, because every caller
+constrains both and a leading `scan_seq` is worthless (one value per table); see
+research.md Decision 17 for the 60 s→74 ms this was worth — `(scan_seq, size)` —
+the latter serves phase 2's `GROUP BY size HAVING COUNT(*) > 1` directly — and
+`(scan_seq, full_checksum)` for phase 4's grouping.
 
 **Invalidation**: the phase 1 upsert keeps `partial_checksum`, `full_checksum`
 and `checksummed_at` only when the incoming `size` **and** `modification_time`

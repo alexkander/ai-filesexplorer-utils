@@ -418,6 +418,16 @@ duplicated across the folder boundary.
   run; with folder detection off no row is hidden, because guessing would risk
   hiding a directory that has content.
 
+- **FR-045**: Every row of the by-directory view MUST offer to re-scan just that
+  row — a directory's subtree, or a single file — refreshing that section
+  without replacing the rest of the results. The refresh MUST reuse the current
+  scan's identity (no new result set), MUST re-read only what actually changed
+  (a file whose size and modification time are unchanged keeps its cached
+  checksum), MUST forget files that have vanished from disk, and MUST re-group
+  the WHOLE result set afterwards — a change inside the section can make a file
+  outside it stop or start being a duplicate. It occupies the same
+  one-scan-at-a-time slot as a full scan, and is refused while one is running.
+
 #### Deleting a duplicate copy (User Story 5)
 
 - **FR-038**: From the occurrences dialog, each copy MUST offer to delete that
@@ -448,8 +458,12 @@ duplicated across the folder boundary.
 
 #### Ignore list
 
-- **FR-024**: The user MUST be able to mark any reported file or folder path as
-  ignored, directly from the results listing.
+- **FR-024**: The user MUST be able to mark a path as ignored from anywhere it
+  is shown: the checksum listing's expanded paths, every row of the by-directory
+  view (including directories that merely hold duplicates, which is the most
+  useful case), and the occurrences dialog. Ignoring a file removes that copy
+  from the count, so a content down to a single copy stops being reported at
+  all; ignoring a directory applies the same rule to everything inside it.
 - **FR-025**: An ignored folder MUST exclude that folder and everything beneath
   it from subsequent scans; an ignored file MUST exclude only that file.
 - **FR-026**: Marking a path as ignored MUST remove it from the current results

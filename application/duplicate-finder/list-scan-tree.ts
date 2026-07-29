@@ -9,6 +9,10 @@ import type {
 
 export interface ListScanTreeParams {
   rootPath: string;
+  /** The scan's own root, which differs from `rootPath` during a partial
+   * refresh: only the real root has a NULL `parent_path`, and a refreshed
+   * subtree must not orphan itself from the tree it belongs to. */
+  scanRootPath?: string;
   scanSeq: number;
   fileSystem: FileSystemPort;
   repository: DuplicateRepositoryPort;
@@ -20,6 +24,9 @@ export interface ListScanTreeResult {
   fileCount: number;
   unreadableCount: number;
   aborted: boolean;
+  /** Every file path this walk actually saw — a refresh diffs it against
+   * what was recorded to find the ones that vanished from disk. */
+  visitedFiles: string[];
 }
 
 /**
@@ -37,14 +44,16 @@ export async function listScanTree(
 ): Promise<ListScanTreeResult> {
   const { rootPath, scanSeq, fileSystem, repository, ignoredPaths, signal } =
     params;
+  const scanRootPath = params.scanRootPath ?? rootPath;
 
   let fileCount = 0;
   let unreadableCount = 0;
+  const visitedFiles: string[] = [];
   const stack: string[] = [rootPath];
 
   while (stack.length > 0) {
     if (signal.aborted) {
-      return { fileCount, unreadableCount, aborted: true };
+      return { fileCount, unreadableCount, aborted: true, visitedFiles };
     }
 
     const currentPath = stack.pop()!;
@@ -60,7 +69,7 @@ export async function listScanTree(
         {
           path: currentPath,
           parentPath:
-            currentPath === rootPath ? null : getParentPath(currentPath),
+            currentPath === scanRootPath ? null : getParentPath(currentPath),
           depth: getDepth(currentPath),
           hasIncompleteContent: true,
         },
@@ -91,6 +100,7 @@ export async function listScanTree(
           // honest rather than trusting that invariant silently.
           modificationTime: entry.modificationTime ?? '',
         });
+        visitedFiles.push(entry.path);
       } else if (entry.kind === 'directory') {
         stack.push(entry.path);
       }
@@ -105,7 +115,7 @@ export async function listScanTree(
       {
         path: currentPath,
         parentPath:
-          currentPath === rootPath ? null : getParentPath(currentPath),
+          currentPath === scanRootPath ? null : getParentPath(currentPath),
         depth: getDepth(currentPath),
         // An ignored child is not "unreadable", but it does mean this
         // directory's recorded content is not its real content — deriving a
@@ -123,5 +133,5 @@ export async function listScanTree(
     });
   }
 
-  return { fileCount, unreadableCount, aborted: false };
+  return { fileCount, unreadableCount, aborted: false, visitedFiles };
 }

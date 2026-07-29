@@ -8,6 +8,8 @@ export interface ScanWorkerPort {
   /** Begins a run and returns its `scan_seq`. The caller has already
    * established that no other scan is in flight (spec FR-008). */
   start(rootPath: string, includeFolders: boolean): number;
+  /** Re-scans one section of the existing result set, keeping the rest. */
+  startRefresh(scopePath: string): number;
   /** Aborts the in-flight read and lets the pipeline finish as `stopped`.
    * A no-op when nothing is running. */
   requestStop(): void;

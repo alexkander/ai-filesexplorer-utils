@@ -457,6 +457,46 @@ result set the scan already persisted.
       structure, `B` stayed intact, the group vanished at one copy, and deleting
       `B` came back `409` with the folder still there.
 
+- [x] Ignore available from the by-directory rows and the occurrences dialog,
+      not just the checksum listing (user request). No server change was needed:
+      `setIgnored` already pruned the subtree, recounted the groups and dropped
+      those left below two copies. Verified: ignoring one of two copies removed
+      the group entirely (`removedGroups: 1`), one of three left two
+      (`removedGroups: 0`), and ignoring a folder took its inner duplicate with
+      it — with every file still on disk. The chance to delete the now-shared
+      prune body from `setIgnored` was taken while there (−22 lines).
+
+- [x] Per-row **Rescan** (FR-045): `refresh-scope.ts`, the worker's
+      `startRefresh`, `POST /api/duplicate-finder/refresh`, and the button on
+      every by-directory row. Keeps `scan_seq`, so the rest of the results
+      survive; `listScanTree` gained a `scanRootPath` (only the real root has a
+      NULL `parent_path`) and now returns the paths it visited, which is how
+      vanished files are found and forgotten. Verified: after deleting one file
+      and adding another inside one folder, refreshing only that folder took
+      `a.bin`'s group away — its surviving copy lived OUTSIDE the refreshed
+      scope — and grew `b.bin` to three copies, with `scan_seq` unchanged.
+
+- [x] Composite `(parent_path, scan_seq)` indexes, replacing the single-column
+      `parent_path` ones (research.md Decision 17). Found by profiling the
+      "Rescan takes far longer than expected" report: the folder pass was taking
+      **60 s** because the planner chose `(scan_seq, size)` and scanned all 57 k
+      rows per directory. Now 74 ms, and a partial refresh went from ~63 s to
+      ~0.7 s. Full scans pay the same pass and improve identically.
+
+- [x] **Bug fixed (mine)**: ignored paths were coming back. Ignoring prunes
+      `duplicate_occurrences` but leaves the `scanned_files` facts and
+      checksums, and the Rescan feature re-groups globally from exactly those
+      rows — so refreshing anything resurrected every ignored folder
+      (`Archivos enviados De La Flor` was back with 54 duplicates, `mpc-beats`
+      with 10). The flaw was predicted while discussing un-ignore and then
+      shipped anyway. Now `hashCandidates`, `deriveFolderGroups`,
+      `buildDuplicateResults` and the by-directory listing all consult the
+      ignore set (FR-046), reusing the domain's `isIgnored`; an ignored child
+      also marks its parent's content incomplete, as the walk already did.
+      Verified against a copy of the real database: the three reported paths are
+      gone, and a refresh of `Musica` no longer brings its four ignored
+      subfolders back.
+
 ### Follow-ups after the first commit (user requests, 2026-07-29)
 
 Three listing changes, all re-verified against a rebuilt production server:

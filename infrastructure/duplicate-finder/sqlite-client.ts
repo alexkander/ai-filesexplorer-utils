@@ -55,8 +55,15 @@ retryWhileBusy(() =>
     scan_seq INTEGER NOT NULL
   );
 
-  CREATE INDEX IF NOT EXISTS idx_scanned_files_parent_path
-    ON scanned_files (parent_path);
+  -- Both columns, in this order, because every caller constrains both and
+  -- scan_seq has exactly ONE value in the table: given only (parent_path)
+  -- and (scan_seq, size) to choose from, SQLite picked the latter and then
+  -- filtered parent_path across all 57k rows of the scan, once per directory
+  -- — 60 s for a folder pass that takes 74 ms with this index (research.md
+  -- Decision 17). A single-column parent_path index is redundant next to it:
+  -- this one leads with the same column.
+  CREATE INDEX IF NOT EXISTS idx_scanned_files_parent_scan
+    ON scanned_files (parent_path, scan_seq);
   -- Serves the size cascade's first stage directly (FR-013).
   CREATE INDEX IF NOT EXISTS idx_scanned_files_scan_size
     ON scanned_files (scan_seq, size);
@@ -83,8 +90,8 @@ retryWhileBusy(() =>
   -- The folder pass walks deepest-first, so depth is part of the index.
   CREATE INDEX IF NOT EXISTS idx_scanned_directories_scan_depth
     ON scanned_directories (scan_seq, depth DESC);
-  CREATE INDEX IF NOT EXISTS idx_scanned_directories_parent_path
-    ON scanned_directories (parent_path);
+  CREATE INDEX IF NOT EXISTS idx_scanned_directories_parent_scan
+    ON scanned_directories (parent_path, scan_seq);
   CREATE INDEX IF NOT EXISTS idx_scanned_directories_scan_checksum
     ON scanned_directories (scan_seq, directory_checksum);
 
@@ -130,6 +137,16 @@ retryWhileBusy(() =>
     path TEXT PRIMARY KEY,
     ignored_at TEXT NOT NULL
   );
+`),
+);
+
+// Superseded by the (parent_path, scan_seq) pair above. Dropped rather than
+// left behind: every one of the ~57k inserts a scan makes would keep paying
+// for it, and the planner was already choosing badly with it around.
+retryWhileBusy(() =>
+  db.exec(`
+  DROP INDEX IF EXISTS idx_scanned_files_parent_path;
+  DROP INDEX IF EXISTS idx_scanned_directories_parent_path;
 `),
 );
 

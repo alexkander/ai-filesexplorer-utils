@@ -164,6 +164,27 @@ later scan (FR-025), and immediately prunes the current results (FR-026).
 Unmarking (`"ignored": false`) only removes the ignore entry; the content
 reappears on the next scan (FR-027).
 
+## `POST /api/duplicate-finder/refresh`
+
+Re-scans one section of the existing result set (FR-045).
+
+**Body**: `{ "path": "/data/photos/2024" }` — a directory or a single file.
+
+**Response `202`**: `{ "started": true, "scopePath": "...", "scanSeq": 6 }` —
+note that `scanSeq` is the _current_ one, unchanged: a refresh preserves the
+rest of the results rather than starting a new set. The client polls `/status`
+exactly as it does for a full scan.
+
+**Response `409`**:
+`{ "error": "scan_running" | "no_scan" | "outside_scan" | "ignored" }`.
+
+The work is the pipeline minus the full walk: re-walk the scope, forget what
+vanished, re-hash (which only reads files whose facts changed or that are new),
+re-derive folder checksums when the scan asked for them, and re-group
+everything. The grouping is global on purpose — whether a file is a duplicate
+depends on the whole tree, so a change inside the scope can leave a file outside
+it with no partner.
+
 ## `POST /api/duplicate-finder/delete`
 
 Moves one duplicate copy into the trash area (FR-038 — FR-043). **Two-step by

@@ -70,6 +70,7 @@ export async function runDuplicateScan(
         checksums,
         cache,
         partialThreshold,
+        ignoredPaths,
         signal,
       });
       aborted = hashing.aborted;
@@ -78,7 +79,12 @@ export async function runDuplicateScan(
     let foldersDerived = false;
     if (!aborted && includeFolders) {
       repository.updateProgress({ phase: 'deriving_folders' });
-      const folders = deriveFolderGroups({ scanSeq, repository, signal });
+      const folders = deriveFolderGroups({
+        scanSeq,
+        repository,
+        ignoredPaths,
+        signal,
+      });
       aborted = folders.aborted;
       foldersDerived = !folders.aborted;
     }
@@ -87,6 +93,7 @@ export async function runDuplicateScan(
     buildDuplicateResults({
       scanSeq,
       repository,
+      ignoredPaths,
       includeFolders: includeFolders && foldersDerived,
     });
 

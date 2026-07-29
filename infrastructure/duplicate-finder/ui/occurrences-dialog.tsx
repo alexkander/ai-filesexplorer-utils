@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Loader2, Trash2 } from 'lucide-react';
+import { EyeOff, Loader2, Trash2 } from 'lucide-react';
 import { Button } from '@/infrastructure/ui/components/button';
 import {
   Dialog,
@@ -97,6 +97,38 @@ export function OccurrencesDialog({
     unreadable: 'That file could not be read.',
     outside_scan: 'That path lies outside the scanned directory.',
     scan_running: 'A scan is running — stop it before deleting anything.',
+  };
+
+  /**
+   * Excludes one copy from duplicate search. The server prunes it and repairs
+   * the group, so ignoring one of two copies leaves the other not duplicated
+   * at all and the group disappears — exactly what deleting a copy does to the
+   * results, minus touching the disk.
+   */
+  const ignore = async (path: string) => {
+    setBusyPath(path);
+    try {
+      const res = await fetch('/api/duplicate-finder/ignore', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path, ignored: true }),
+      });
+      if (!res.ok) {
+        window.alert(`Failed to ignore "${path}"`);
+        return;
+      }
+      setPlan(null);
+      onDeleted();
+
+      const remaining = (paths ?? []).filter((other) => other !== path);
+      if (remaining.length < 2) {
+        onClose();
+        return;
+      }
+      if (key) setResult({ key, paths: remaining, failed: false });
+    } finally {
+      setBusyPath(null);
+    }
   };
 
   /** Step 1: ask the server what would happen, touching nothing. */
@@ -229,6 +261,21 @@ export function OccurrencesDialog({
                   {/* Only offered while the content still has copies to
                       spare. At two the group is about to disappear, and the
                       survivor must not be deletable from here (user rule). */}
+                  <Button
+                    variant="ghost"
+                    size="xs"
+                    disabled={busyPath !== null}
+                    onClick={() => void ignore(path)}
+                    title={
+                      target?.kind === 'directory'
+                        ? 'Ignore this folder and everything in it in future scans'
+                        : 'Ignore this copy in future scans'
+                    }
+                  >
+                    <EyeOff className="size-3" aria-hidden="true" />
+                    Ignore
+                  </Button>
+
                   {paths.length > 1 && (
                     <Button
                       variant="destructive"

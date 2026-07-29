@@ -381,3 +381,40 @@ nothing else.
 **Alternatives considered**: _Add a method to `FileSystemPort`_ — rejected as
 above. _Infer the difference from `listChildren`'s failure_ — impossible, the
 information is already lost by then.
+
+## Decision 17 — Index on (parent_path, scan_seq), not on parent_path alone (found while profiling)
+
+**Decision**: Index `scanned_files` and `scanned_directories` on
+`(parent_path, scan_seq)`, and drop the single-column `(parent_path)` indexes
+they supersede.
+
+**Rationale**: the folder-derivation pass reads one directory's children at a
+time (`WHERE parent_path = ? AND scan_seq = ?`). With only `(parent_path)` and
+`(scan_seq, size)` available, SQLite chose the latter — and since `scan_seq` has
+exactly ONE value in the table, "SEARCH USING INDEX idx_scanned_files_scan_size
+(scan_seq=?)" means visiting all 57 352 rows of the scan and filtering
+`parent_path` in memory. Once per directory. 2160 directories × 57 k rows ≈ 124
+million row visits.
+
+Measured on the real database:
+
+|                               | Folder pass over 2160 directories |
+| ----------------------------- | --------------------------------- |
+| Before                        | **60 120 ms**                     |
+| After                         | **74 ms**                         |
+| Cost of creating both indexes | 38 ms                             |
+
+End to end, a partial refresh went from ~63 s to ~0.7 s, and a full scan pays
+the same pass, so it benefits identically — the 71 s the user's 2169-directory
+scan took was almost entirely this.
+
+The lesson worth keeping: an index whose leading column is a constant across the
+whole table is not a filter, it is a full scan with extra steps, and the planner
+will still prefer it over a genuinely selective single-column index. An index
+that satisfies every constraint of the query removes the choice.
+
+**Alternatives considered**: _`ANALYZE` so the planner has real statistics_ —
+would probably fix the choice, but it needs re-running as the data grows and
+leaves the pathological plan one stale statistic away; the composite index makes
+the good plan the only plan. _`INDEXED BY` to force it_ — same effect, but it
+hard-codes an index name into the SQL and fails loudly if the schema changes.

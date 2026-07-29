@@ -1,7 +1,15 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { ChevronRight, CornerLeftUp, File, Files, Folder } from 'lucide-react';
+import {
+  ChevronRight,
+  CornerLeftUp,
+  EyeOff,
+  File,
+  Files,
+  Folder,
+  RefreshCw,
+} from 'lucide-react';
 import { Button } from '@/infrastructure/ui/components/button';
 import type {
   DirectoryRow,
@@ -66,6 +74,7 @@ export function DirectoryDuplicatesView({
   onExcludeEmptyFilesChange,
   onExcludeEmptyDirectoriesChange,
   refreshKey,
+  onResultsChanged,
 }: {
   sortBy: DirectorySortBy;
   sortDir: SortDir;
@@ -77,12 +86,17 @@ export function DirectoryDuplicatesView({
   onExcludeEmptyFilesChange: (value: boolean) => void;
   onExcludeEmptyDirectoriesChange: (value: boolean) => void;
   refreshKey: number;
+  /** The result set changed under us (a path ignored, a copy deleted), so the
+   * tab's own group count has to be refetched too. */
+  onResultsChanged: () => void;
 }) {
   const [path, setPath] = useState<string | null>(null);
   const [page, setPage] = useState(0);
   const [view, setView] = useState<DirectoryView | null>(null);
   const [occurrencesTarget, setOccurrencesTarget] =
     useState<OccurrencesTarget | null>(null);
+  const [ignoring, setIgnoring] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState<string | null>(null);
 
   const fetchView = useCallback(async (): Promise<DirectoryView | null> => {
     const query = new URLSearchParams({
@@ -123,6 +137,66 @@ export function DirectoryDuplicatesView({
       ignore = true;
     };
   }, [fetchView, refreshKey]);
+
+  /**
+   * Excludes a path from duplicate search. For a directory that means its
+   * whole subtree, duplicated or not — which is why this is offered on every
+   * directory row and not only on the duplicated ones: excluding a folder that
+   * merely *holds* duplicates is the most useful case of all.
+   */
+  const ignore = async (targetPath: string) => {
+    setIgnoring(targetPath);
+    try {
+      const res = await fetch('/api/duplicate-finder/ignore', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: targetPath, ignored: true }),
+      });
+      if (!res.ok) {
+        window.alert(`Failed to ignore "${targetPath}"`);
+        return;
+      }
+      await load();
+      onResultsChanged();
+    } finally {
+      setIgnoring(null);
+    }
+  };
+
+  const REFRESH_REFUSALS: Record<string, string> = {
+    scan_running: 'A scan is already running — wait for it or stop it first.',
+    no_scan: 'There is nothing to refresh yet: run a scan first.',
+    outside_scan: 'That path lies outside the scanned directory.',
+    ignored:
+      'That path is on the ignored list, so a refresh would find nothing.',
+  };
+
+  /**
+   * Re-scans just this row: a directory's subtree, or a single file. Runs in
+   * the background like a full scan, so the status panel drives the feedback
+   * and the listing refreshes on its polling tick.
+   */
+  const rescan = async (targetPath: string) => {
+    setRefreshing(targetPath);
+    try {
+      const res = await fetch('/api/duplicate-finder/refresh', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: targetPath }),
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        window.alert(
+          REFRESH_REFUSALS[body.error ?? ''] ??
+            'That path could not be refreshed.',
+        );
+        return;
+      }
+      onResultsChanged();
+    } finally {
+      setRefreshing(null);
+    }
+  };
 
   const navigate = (nextPath: string) => {
     setPath(nextPath);
@@ -361,6 +435,40 @@ export function DirectoryDuplicatesView({
                 label="Path"
                 title={`Copy full path: ${row.path}`}
               />
+              <Button
+                variant="ghost"
+                size="xs"
+                disabled={refreshing !== null}
+                onClick={() => void rescan(row.path)}
+                title={
+                  row.kind === 'directory'
+                    ? 'Re-scan this folder only, keeping the rest of the results'
+                    : 'Re-scan this file only'
+                }
+              >
+                <RefreshCw
+                  className={cn(
+                    'size-3',
+                    refreshing === row.path && 'animate-spin',
+                  )}
+                  aria-hidden="true"
+                />
+                Rescan
+              </Button>
+              <Button
+                variant="ghost"
+                size="xs"
+                disabled={ignoring !== null}
+                onClick={() => void ignore(row.path)}
+                title={
+                  row.kind === 'directory'
+                    ? 'Ignore this folder and everything in it in future scans'
+                    : 'Ignore this file in future scans'
+                }
+              >
+                <EyeOff className="size-3" aria-hidden="true" />
+                Ignore
+              </Button>
               {row.kind === 'directory' && (
                 <Button
                   variant="ghost"

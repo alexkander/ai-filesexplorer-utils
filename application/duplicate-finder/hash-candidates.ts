@@ -1,3 +1,4 @@
+import { isIgnored } from '@/domain/duplicate-finder/ignored-path-match';
 import type { ChecksumPort } from './checksum-port';
 import type { ChecksumCachePort } from './checksum-cache-port';
 import type {
@@ -13,6 +14,8 @@ export interface HashCandidatesParams {
   /** Bytes covered by a partial checksum — at or below it, that value IS the
    * full checksum (research.md Decision 5). */
   partialThreshold: number;
+  /** Excluded paths are not worth reading: the grouping drops them anyway. */
+  ignoredPaths: ReadonlySet<string>;
   signal: AbortSignal;
 }
 
@@ -39,14 +42,23 @@ export interface HashCandidatesResult {
 export async function hashCandidates(
   params: HashCandidatesParams,
 ): Promise<HashCandidatesResult> {
-  const { scanSeq, repository, checksums, cache, partialThreshold, signal } =
-    params;
+  const {
+    scanSeq,
+    repository,
+    checksums,
+    cache,
+    partialThreshold,
+    ignoredPaths,
+    signal,
+  } = params;
 
   let hashed = 0;
   let reused = 0;
   let failed = 0;
 
-  const partialCandidates = repository.findSharedSizeCandidates(scanSeq);
+  const partialCandidates = repository
+    .findSharedSizeCandidates(scanSeq)
+    .filter((candidate) => !isIgnored(candidate.path, ignoredPaths));
   repository.updateProgress({ processed: 0, total: partialCandidates.length });
 
   const reuseFromCache = (candidate: FileCandidate) =>
@@ -116,10 +128,9 @@ export async function hashCandidates(
     }
   }
 
-  const fullCandidates = repository.findSharedPartialCandidates(
-    scanSeq,
-    partialThreshold,
-  );
+  const fullCandidates = repository
+    .findSharedPartialCandidates(scanSeq, partialThreshold)
+    .filter((candidate) => !isIgnored(candidate.path, ignoredPaths));
   repository.updateProgress({ processed: 0, total: fullCandidates.length });
 
   processed = 0;

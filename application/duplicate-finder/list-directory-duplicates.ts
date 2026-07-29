@@ -4,6 +4,7 @@ import {
   type DirectoryRow,
 } from '@/domain/duplicate-finder/directory-row';
 import type { SortDir } from '@/domain/duplicate-finder/duplicate-group';
+import { isIgnored } from '@/domain/duplicate-finder/ignored-path-match';
 import { normalizeScanPath } from '@/domain/duplicate-finder/normalize-path';
 import {
   getName,
@@ -100,6 +101,14 @@ export function listDirectoryDuplicates(
       ? requestedPath
       : rootPath;
 
+  // Ignored paths are excluded from the search, so they have no business being
+  // listed here either — not even as a row showing 0. The walk already skips
+  // them on a later scan, but between ignoring one and re-scanning its rows are
+  // still recorded, and a refresh regroups from exactly those rows.
+  const ignoredPaths = repository.loadIgnoredPathSet();
+  const visibleAt = (candidatePath: string) =>
+    !isIgnored(candidatePath, ignoredPaths);
+
   const aggregates = new Map(
     repository
       .aggregateDuplicatesByChild(currentPath, filters)
@@ -113,10 +122,9 @@ export function listDirectoryDuplicates(
 
   const rows: DirectoryRow[] = [];
 
-  for (const childPath of repository.listChildDirectories(
-    currentPath,
-    filters,
-  )) {
+  for (const childPath of repository
+    .listChildDirectories(currentPath, filters)
+    .filter(visibleAt)) {
     const aggregate = aggregates.get(childPath);
     const asDuplicate = directDuplicates.get(childPath);
     rows.push({
@@ -137,6 +145,7 @@ export function listDirectoryDuplicates(
   // ones the scan actually flagged.
   for (const [path, entry] of directDuplicates) {
     if (entry.kind === 'directory') continue;
+    if (!visibleAt(path)) continue;
     rows.push({
       path,
       name: getName(path),
@@ -150,9 +159,12 @@ export function listDirectoryDuplicates(
     });
   }
 
+  // Summed from the visible rows rather than from every aggregate, so an
+  // ignored subtree does not inflate the header either.
   let subtreeCount = 0;
   let subtreeSize = 0;
-  for (const aggregate of aggregates.values()) {
+  for (const [childPath, aggregate] of aggregates) {
+    if (!visibleAt(childPath)) continue;
     subtreeCount += aggregate.count;
     subtreeSize += aggregate.size;
   }

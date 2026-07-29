@@ -229,6 +229,7 @@ export function DuplicateFinderView() {
                 handleExcludeEmptyDirectoriesChange
               }
               refreshKey={tick}
+              onResultsChanged={() => void refetch()}
             />
           )}
         </div>

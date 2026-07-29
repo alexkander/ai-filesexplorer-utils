@@ -3,11 +3,18 @@ import {
   type ChildDescriptor,
 } from '@/domain/duplicate-finder/derive-directory-checksum';
 import { isDirectoryCandidate } from '@/domain/duplicate-finder/directory-candidacy';
+import { isIgnored } from '@/domain/duplicate-finder/ignored-path-match';
 import type { DuplicateRepositoryPort } from './duplicate-repository-port';
 
 export interface DeriveFolderGroupsParams {
   scanSeq: number;
   repository: DuplicateRepositoryPort;
+  /** An ignored child means this directory's recorded content is not its real
+   * content, so no checksum derived from it can be trusted — the same rule the
+   * walk applies via `has_incomplete_content` (research.md Decision 15),
+   * re-applied here because a refresh derives from rows that predate the
+   * ignore. */
+  ignoredPaths: ReadonlySet<string>;
   signal: AbortSignal;
 }
 
@@ -33,7 +40,7 @@ export interface DeriveFolderGroupsResult {
 export function deriveFolderGroups(
   params: DeriveFolderGroupsParams,
 ): DeriveFolderGroupsResult {
-  const { scanSeq, repository, signal } = params;
+  const { scanSeq, repository, ignoredPaths, signal } = params;
 
   const sharedContentPaths = repository.findSharedContentPaths(scanSeq);
   const directories = repository.listDirectoriesDeepestFirst(scanSeq);
@@ -49,7 +56,20 @@ export function deriveFolderGroups(
     processed += 1;
     repository.updateProgress({ processed, activePath: directory.path });
 
+    if (isIgnored(directory.path, ignoredPaths)) {
+      repository.recordDirectoryResult(directory.path, {
+        isCandidate: false,
+        directoryChecksum: null,
+        subtreeSize: 0,
+        childCount: 0,
+      });
+      continue;
+    }
+
     const children = repository.getDirectChildren(directory.path, scanSeq);
+    const hasIgnoredChild =
+      children.files.some((file) => isIgnored(file.path, ignoredPaths)) ||
+      children.directories.some((dir) => isIgnored(dir.path, ignoredPaths));
 
     const subtreeSize =
       children.files.reduce((sum, file) => sum + file.size, 0) +
@@ -57,7 +77,7 @@ export function deriveFolderGroups(
     const childCount = children.files.length + children.directories.length;
 
     const candidate = isDirectoryCandidate({
-      hasIncompleteContent: directory.hasIncompleteContent,
+      hasIncompleteContent: directory.hasIncompleteContent || hasIgnoredChild,
       files: children.files.map((file) => ({
         contentIsShared: sharedContentPaths.has(file.path),
         hasReadError: file.hasReadError,

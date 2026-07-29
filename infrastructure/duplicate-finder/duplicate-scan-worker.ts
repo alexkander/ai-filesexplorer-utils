@@ -1,3 +1,4 @@
+import { refreshScope } from '@/application/duplicate-finder/refresh-scope';
 import { runDuplicateScan } from '@/application/duplicate-finder/run-duplicate-scan';
 import type { ScanWorkerPort } from '@/application/duplicate-finder/scan-worker-port';
 import { filesystemAdapter } from '@/infrastructure/scanning/filesystem-adapter';
@@ -27,6 +28,10 @@ class DuplicateScanWorker implements ScanWorkerPort {
     // what happened instead of a scan that appears to be progressing with
     // nothing behind it (research.md Decision 3).
     duplicateRepositoryAdapter.reconcileInterruptedScan();
+    // Heals results written before the pipeline knew about the ignore list:
+    // filtering at read time left them stored, and therefore still counted in
+    // every ancestor's totals and still listed by the Duplicates tab.
+    duplicateRepositoryAdapter.pruneIgnoredFromResults();
   }
 
   start(rootPath: string, includeFolders: boolean): number {
@@ -53,6 +58,33 @@ class DuplicateScanWorker implements ScanWorkerPort {
     }).finally(() => {
       // Only the run that is still current clears the controller — a
       // superseded one finishing later must not disarm a newer run's Stop.
+      if (this.abortController === controller) this.abortController = null;
+    });
+
+    return scanSeq;
+  }
+
+  /**
+   * Re-scans one section of the current result set. Occupies the same
+   * single-run slot as a full scan (spec FR-008), so the UI shows the same
+   * progress panel and Stop button, but keeps `scan_seq` — and therefore the
+   * rest of the results — untouched.
+   */
+  startRefresh(scopePath: string): number {
+    const scanSeq = duplicateRepositoryAdapter.beginRefresh(scopePath);
+
+    const controller = new AbortController();
+    this.abortController = controller;
+
+    void refreshScope({
+      scopePath,
+      repository: duplicateRepositoryAdapter,
+      fileSystem: filesystemAdapter,
+      checksums: checksumAdapter,
+      cache: comparisonChecksumReadonlyAdapter,
+      partialThreshold: PARTIAL_CHECKSUM_BYTES,
+      signal: controller.signal,
+    }).finally(() => {
       if (this.abortController === controller) this.abortController = null;
     });
 

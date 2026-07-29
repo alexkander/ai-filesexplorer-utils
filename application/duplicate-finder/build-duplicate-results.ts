@@ -1,4 +1,5 @@
 import { isFullyExplainedByOneFolderGroup } from '@/domain/duplicate-finder/collapse-nested-groups';
+import { isIgnored } from '@/domain/duplicate-finder/ignored-path-match';
 import {
   EMPTY_CONTENT_CHECKSUM,
   type DuplicateGroupWithPaths,
@@ -9,6 +10,14 @@ export interface BuildDuplicateResultsParams {
   scanSeq: number;
   repository: DuplicateRepositoryPort;
   includeFolders: boolean;
+  /**
+   * Paths excluded from duplicate search. Filtered HERE and not only during
+   * the walk, because a partial refresh re-groups from `scanned_files` rows
+   * that predate the ignore — the walk skipped those paths on a later scan,
+   * but their facts and checksums are still recorded. Without this, ignoring
+   * a folder and then refreshing anything would bring it straight back.
+   */
+  ignoredPaths: ReadonlySet<string>;
 }
 
 export interface BuildDuplicateResultsResult {
@@ -28,21 +37,33 @@ export interface BuildDuplicateResultsResult {
 export function buildDuplicateResults(
   params: BuildDuplicateResultsParams,
 ): BuildDuplicateResultsResult {
-  const { scanSeq, repository, includeFolders } = params;
+  const { scanSeq, repository, includeFolders, ignoredPaths } = params;
 
-  const fileGroups = repository
-    .findDuplicateFileGroups(scanSeq)
-    .map((group): DuplicateGroupWithPaths => ({
-      ...group,
-      // Decided by the digest, not by `size === 0`: a file whose size is
-      // misreported as 0 (rclone's Google Drive mount does this for Office
-      // files edited in Drive) holds real content and must not be labelled
-      // empty (research.md Decision 12).
-      isEmpty: group.checksum === EMPTY_CONTENT_CHECKSUM,
-    }));
+  /** Drops ignored occurrences and, with them, any group left under two. */
+  const withoutIgnored = (
+    groups: DuplicateGroupWithPaths[],
+  ): DuplicateGroupWithPaths[] =>
+    groups
+      .map((group) => ({
+        ...group,
+        paths: group.paths.filter((path) => !isIgnored(path, ignoredPaths)),
+      }))
+      .filter((group) => group.paths.length > 1)
+      .map((group) => ({ ...group, occurrenceCount: group.paths.length }));
+
+  const fileGroups = withoutIgnored(
+    repository.findDuplicateFileGroups(scanSeq),
+  ).map((group): DuplicateGroupWithPaths => ({
+    ...group,
+    // Decided by the digest, not by `size === 0`: a file whose size is
+    // misreported as 0 (rclone's Google Drive mount does this for Office
+    // files edited in Drive) holds real content and must not be labelled
+    // empty (research.md Decision 12).
+    isEmpty: group.checksum === EMPTY_CONTENT_CHECKSUM,
+  }));
 
   const folderGroups = includeFolders
-    ? repository.findDuplicateDirectoryGroups(scanSeq)
+    ? withoutIgnored(repository.findDuplicateDirectoryGroups(scanSeq))
     : [];
 
   // Which duplicated folder each folder-group member is — the index the

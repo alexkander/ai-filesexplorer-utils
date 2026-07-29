@@ -166,6 +166,19 @@ export interface DuplicateRepositoryPort {
   ): void;
   /** Startup reconciliation: a row left `running` by a dead process. */
   reconcileInterruptedScan(): void;
+  /**
+   * Marks a partial refresh as running WITHOUT bumping `scan_seq`: the point
+   * of refreshing one section is to keep the rest of the result set, and the
+   * sequence number is what scopes it (spec FR-045).
+   */
+  beginRefresh(scopePath: string): number;
+
+  // ---- partial refresh --------------------------------------------------
+  /** File paths currently recorded at or beneath `path`, so a refresh can
+   * tell which ones the walk no longer found. */
+  listFilePathsUnder(path: string): string[];
+  /** Forgets rows for paths that have vanished from disk. */
+  deleteScannedPaths(paths: string[]): void;
 
   // ---- phase 1: listing -------------------------------------------------
   upsertFileFacts(facts: FileFacts[], scanSeq: number): void;
@@ -256,6 +269,14 @@ export interface DuplicateRepositoryPort {
   // ---- ignore list ------------------------------------------------------
   listIgnoredPaths(): IgnoredPath[];
   loadIgnoredPathSet(): Set<string>;
+  /**
+   * Drops every stored occurrence that sits at or beneath an ignored path, and
+   * repairs the groups they belonged to. Filtering at read time is not enough:
+   * results written before a path was ignored — or by a grouping pass that was
+   * not yet ignore-aware — stay on disk and keep being counted (spec FR-046).
+   * Idempotent, so it is safe to run on every startup.
+   */
+  pruneIgnoredFromResults(): PruneCounts;
   /**
    * Marking owns the whole operation: ignore row, occurrence removal at or
    * beneath `path`, group recount, and deletion of any group left below two

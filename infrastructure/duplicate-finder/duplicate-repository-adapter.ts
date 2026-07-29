@@ -152,6 +152,29 @@ const reconcileStmt = db.prepare(`
   WHERE id = 1 AND state = 'running'
 `);
 
+// A refresh reuses the current scan_seq on purpose — see the port docs.
+const beginRefreshStmt = db.prepare(`
+  UPDATE scan_state SET
+    state = 'running',
+    phase = 'listing',
+    active_path = @scopePath,
+    processed = 0,
+    total = 0,
+    error_message = NULL,
+    started_at = @now,
+    finished_at = NULL
+  WHERE id = 1
+`);
+
+const listFilePathsUnderStmt = db.prepare(`
+  SELECT path FROM scanned_files
+  WHERE path = @path OR path LIKE @likePattern ESCAPE '\\'
+`);
+
+const deleteScannedFileByPathStmt = db.prepare(
+  `DELETE FROM scanned_files WHERE path = @path`,
+);
+
 // ---- phase 1: listing -----------------------------------------------------
 
 // Checksums survive a re-scan only while the file's own facts are unchanged;
@@ -680,6 +703,26 @@ export const duplicateRepositoryAdapter: DuplicateRepositoryPort = {
     reconcileStmt.run({ now: new Date().toISOString() });
   },
 
+  beginRefresh(scopePath: string) {
+    beginRefreshStmt.run({ scopePath, now: new Date().toISOString() });
+    return (getScanStateStmt.get() as ScanStateRow).scan_seq;
+  },
+
+  listFilePathsUnder(path: string) {
+    const rows = listFilePathsUnderStmt.all({
+      path,
+      likePattern: subtreeLikePattern(path),
+    }) as { path: string }[];
+    return rows.map((row) => row.path);
+  },
+
+  deleteScannedPaths(paths: string[]) {
+    const tx = db.transaction((targets: string[]) => {
+      for (const path of targets) deleteScannedFileByPathStmt.run({ path });
+    });
+    tx(paths);
+  },
+
   upsertFileFacts(facts: FileFacts[], scanSeq: number) {
     const tx = db.transaction((rows: FileFacts[]) => {
       for (const row of rows) upsertFileFactsStmt.run({ ...row, scanSeq });
@@ -1008,6 +1051,23 @@ export const duplicateRepositoryAdapter: DuplicateRepositoryPort = {
     return new Set(rows.map((row) => row.path));
   },
 
+  pruneIgnoredFromResults(): PruneCounts {
+    const tx = db.transaction((): PruneCounts => {
+      let removedGroups = 0;
+      let removedOccurrences = 0;
+      for (const row of listIgnoredPathValuesStmt.all() as { path: string }[]) {
+        const counts = pruneResultsUnder(
+          row.path,
+          subtreeLikePattern(row.path),
+        );
+        removedGroups += counts.removedGroups;
+        removedOccurrences += counts.removedOccurrences;
+      }
+      return { removedGroups, removedOccurrences };
+    });
+    return tx();
+  },
+
   setIgnored(path: string, ignored: boolean): PruneCounts {
     if (!ignored) {
       clearIgnoredStmt.run({ path });
@@ -1019,33 +1079,11 @@ export const duplicateRepositoryAdapter: DuplicateRepositoryPort = {
     const likePattern = subtreeLikePattern(path);
     const tx = db.transaction((): PruneCounts => {
       setIgnoredStmt.run({ path, now: new Date().toISOString() });
-
-      // The affected groups must be captured BEFORE their occurrences are
-      // deleted — afterwards there is nothing left to derive them from.
-      const affected = findAffectedGroupsStmt.all({ path, likePattern }) as {
-        checksum: string;
-        kind: GroupKind;
-      }[];
-      let removedOccurrences = deleteOccurrencesUnderStmt.run({
-        path,
-        likePattern,
-      }).changes;
-
-      let removedGroups = 0;
-      for (const group of affected) {
-        recountGroupStmt.run(group);
-        const deleted = deleteGroupIfBelowTwoStmt.run(group).changes;
-        if (deleted > 0) {
-          removedGroups += deleted;
-          // A group below two occurrences no longer exists, so its remaining
-          // lone occurrence must go too — the listing's invariant is that a
-          // group always has at least two paths (spec FR-026).
-          removedOccurrences +=
-            deleteRemainingOccurrencesStmt.run(group).changes;
-        }
-      }
-
-      return { removedGroups, removedOccurrences };
+      // Identical to what a moved-away directory needs: everything at or
+      // beneath the path stops existing as far as the results go. Ignoring a
+      // file with two copies therefore leaves the other one not duplicated at
+      // all, and its group disappears with it (spec FR-024).
+      return pruneResultsUnder(path, likePattern);
     });
 
     return tx();
