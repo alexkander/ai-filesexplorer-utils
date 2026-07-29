@@ -95,6 +95,53 @@ result set without a second request. Occurrences are deliberately **not**
 inlined — a group with thousands of paths would otherwise bloat every page that
 contains it.
 
+## `GET /api/duplicate-finder/directory?path=...&sortBy=count&sortDir=desc&hideEmpty=false&page=0`
+
+One level of the by-directory view (FR-031 — FR-037). `path` defaults to the
+scanned root, and anything outside that root silently falls back to it — no
+results exist there, so an empty listing would be a lie. `sortBy` is `count`
+(default), `size` or `name`; `hideEmpty=true` drops directories with no
+duplicates; the page size is 200.
+
+**Response `200`**:
+
+```json
+{
+  "rootPath": "/data/photos",
+  "currentPath": "/data/photos/2024",
+  "parentPath": "/data/photos",
+  "rows": [
+    {
+      "path": "/data/photos/2024/raw",
+      "name": "raw",
+      "kind": "directory",
+      "duplicateCount": 412,
+      "duplicateSize": 8123456789,
+      "isDuplicate": false,
+      "checksum": null,
+      "occurrenceCount": null,
+      "isEmpty": false
+    }
+  ],
+  "total": 37,
+  "page": 0,
+  "pageSize": 200,
+  "subtreeCount": 480,
+  "subtreeSize": 9000000000,
+  "overallCount": 1284,
+  "overallSize": 21000000000
+}
+```
+
+`duplicateCount`/`duplicateSize` cover the row's whole subtree; `subtree*`
+covers `currentPath`; `overall*` covers the entire result set, so a row can be
+read as a share of the total. `parentPath` is `null` at the scanned root, and
+`currentPath` is `null` when no scan has ever run.
+
+`isDuplicate` marks a row that is itself a member of a duplicate group — a
+duplicated file, or a directory reported as a duplicate of another directory —
+and only then are `checksum` and `occurrenceCount` populated.
+
 ## `GET /api/duplicate-finder/occurrences?checksum=...&kind=file`
 
 Every path of one group, for the expanded row (FR-019).
@@ -116,6 +163,44 @@ Marking excludes the path and, for a folder, everything beneath it from every
 later scan (FR-025), and immediately prunes the current results (FR-026).
 Unmarking (`"ignored": false`) only removes the ignore entry; the content
 reappears on the next scan (FR-027).
+
+## `POST /api/duplicate-finder/delete`
+
+Moves one duplicate copy into the trash area (FR-038 — FR-043). **Two-step by
+construction**: `dryRun` defaults to `true`, so a request that omits the flag
+can only ever report what it would do — deleting for real requires an explicit
+`"dryRun": false` (constitution Principle V).
+
+**Body**: `{ "path": "/data/photos/copy.jpg", "dryRun": true }`
+
+**Response `200`**:
+
+```json
+{
+  "outcome": "planned",
+  "plan": {
+    "path": "/data/photos/copy.jpg",
+    "destination": "/app/data/data/photos/copy.jpg",
+    "freedBytes": 204800,
+    "remainingCopies": 2,
+    "groupDisappears": false
+  }
+}
+```
+
+`outcome` is `planned` for a dry run and `deleted` for the real thing; the plan
+is identical in shape, and after a real move `destination` is the path actually
+used (a suffix is appended rather than overwriting anything already there).
+
+**Response `409`**: `{ "error": "<reason>" }` — one of `not_reported`,
+`last_copy`, `is_symlink`, `is_directory`, `not_a_file`, `missing`,
+`unreadable`, `outside_scan`, `inside_trash`, `scan_running`. Every one of these
+is checked again on the real run, not just during the dry run: the confirmed
+plan may be minutes old.
+
+Note that `last_copy` is the backstop, not the usual path — once a content is
+down to one copy its group has already left the result set, so the request fails
+earlier with `not_reported`. Either way the last copy is never deletable.
 
 ## `GET /api/duplicate-finder/ignored-paths`
 

@@ -382,6 +382,81 @@ What was actually run, so the gaps are visible rather than assumed:
   real `data/*.sqlite` files around a production scan is part of the open T051
   run.
 
+### User Story 4 — by-directory tab (user request, 2026-07-29)
+
+Added after the feature shipped; needs no schema change, because it reads the
+result set the scan already persisted.
+
+- [x] Create `domain/duplicate-finder/directory-row.ts`: the row type and its
+      ordering (count / size / name, both directions), with directories and
+      files deliberately mixed rather than blocked apart.
+- [x] Add the four by-directory reads to the repository port and adapter:
+      `listChildDirectories`, `aggregateDuplicatesByChild`,
+      `listDirectDuplicateChildren`, `getDuplicateTotals` — all scoped to the
+      current `scan_seq`, all served by a prefix range over the occurrence path
+      index.
+- [x] Create `application/duplicate-finder/list-directory-duplicates.ts`:
+      assembles one level (child directories with subtree rollups + the
+      duplicate files sitting directly there), applies the hide-empty filter,
+      sorts and pages.
+- [x] Create `app/api/duplicate-finder/directory/route.ts`.
+- [x] Create `infrastructure/duplicate-finder/ui/directory-duplicates-view.tsx`:
+      breadcrumb, Up, double-click or chevron to enter, the hide-empty checkbox,
+      the three sort columns and the subtree/overall summary.
+- [x] Add the tab strip to `duplicate-finder-view.tsx` and persist the active
+      tab, the by-directory sort and the checkbox in
+      `scan-preferences-storage.ts`.
+- [x] Verified against a rebuilt production server on the quickstart fixture:
+      root total matches the Duplicates tab (11 of 11), `unique/` lists with 0
+      and disappears when the checkbox is ticked, counts roll up correctly (3 +
+      2 + 2 + 4 = 11), only duplicate files are listed (`notes.bin`, collapsed
+      by FR-015, is absent while `img.bin` — kept in full because of its third
+      copy — is present), sorting works in both directions, and a path outside
+      the scanned root falls back to the root.
+
+### User Story 5 and the second round of by-directory work (user requests, 2026-07-29)
+
+- [x] Path normalisation (`domain/duplicate-finder/normalize-path.ts`), applied
+      both when a scan starts and when the by-directory view reads
+      `scan_state.root_path`. A trailing slash in the scan form had made that
+      tab come back empty: the root was recorded as `/x/` while every child's
+      `parent_path` was `/x`, so no row matched and the prefix range became
+      `/x//`. Normalising on read fixed the existing scan without a re-scan.
+- [x] Single-click navigation on directory names (the name is a real button),
+      keeping double-click and the chevron. Double-click alone was
+      undiscoverable and selected text.
+- [x] The by-directory tab is the default, and it comes first; a stored explicit
+      choice still wins.
+- [x] Checksum column in the by-directory rows, blank for directories that
+      merely contain duplicates.
+- [x] `occurrences-dialog.tsx`: every place a content lives, opened from the
+      `×N` button of rows that are themselves duplicates. Wide dialog, the
+      opening row highlighted, and the full path on hover — which needed an
+      optional `title` prop on the shared `CopyablePath`, whose hardcoded "Click
+      to copy" was what the tooltip showed.
+- [x] Deletion (User Story 5): `FileDeletionPort` + adapter (`lstat`,
+      `mkdir     -p`, `rename` with an EXDEV copy+unlink fallback, numeric
+      suffix on collision), `delete-duplicate.ts` with its dry-run mode and
+      refusal list, `domain/duplicate-finder/trash-path.ts`, the repository's
+      `findOccurrenceByPath` / `removeDeletedFile`, and the two-step UI.
+      Verified end to end on the fixture: the dry run left the file in place and
+      did not even create the trash directory; the real run moved it to
+      `<trash>/<full original path>`; 3 copies → 2 → group gone at 1; and the
+      last copy came back `409` with the file still on disk.
+- [x] The two empty-content filters (FR-044), applied inside the SQL as bound
+      flags so one prepared statement covers all four combinations. Checked
+      against real data: 5706 → 5629 (empty files) → 5559 (empty dirs) → 5482
+      (both), dropping in cascade through the tree.
+
+- [x] Deleting a duplicated **folder** as well as a file (user request): the
+      move is recursive (`fs.cp`/`fs.rm` on the EXDEV path), and the repository
+      prunes the whole subtree — occurrences beneath the folder included, since
+      FR-015 keeps a file reported in its own right when it also has a copy
+      outside. Verified on a two-identical-folders fixture: dry run touched
+      nothing, the real run moved `A` with its three files preserving the
+      structure, `B` stayed intact, the group vanished at one copy, and deleting
+      `B` came back `409` with the folder still there.
+
 ### Follow-ups after the first commit (user requests, 2026-07-29)
 
 Three listing changes, all re-verified against a rebuilt production server:

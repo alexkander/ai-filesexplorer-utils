@@ -182,6 +182,90 @@ the ignored-paths view, re-scan, and confirm the paths come back.
 
 ---
 
+### User Story 4 - See where the duplicates pile up (Priority: P2)
+
+Added after the first implementation pass, at the user's request.
+
+The checksum listing answers "what is duplicated", but not "which folder is the
+problem". A second tab walks the scanned tree the way a file browser does — one
+directory at a time, starting at the scanned root — and puts two numbers on
+every directory: how many duplicates live anywhere beneath it, and how many
+bytes they take. Directories with nothing duplicated are still listed, showing
+0, so a clean folder is visibly clean rather than absent; a checkbox hides them
+once the user has seen enough. Files appear only when they are themselves one of
+the duplicates found.
+
+**Why this priority**: on a real tree the checksum listing is thousands of rows
+with no geography. This is what turns it into "delete `backup/2019`, that is 40
+GB of the 52 GB". It is P2 rather than P1 because it presents results the scan
+already produced — it needs Story 1, and adds no scanning of its own.
+
+**Independent Test**: after a scan, open the second tab, confirm the root shows
+the same total as the Duplicates tab, walk into the fullest directory, and
+confirm its children's counts add up to its own.
+
+**Acceptance Scenarios**:
+
+1. **Given** a completed scan, **When** the user opens the by-directory tab,
+   **Then** the scanned root is shown with a count equal to the total number of
+   duplicates found.
+2. **Given** a directory whose subtree holds no duplicates, **When** the user
+   lists its parent, **Then** it is present with a count of 0 — and **When** the
+   "hide directories without duplicates" checkbox is ticked, **Then** it
+   disappears.
+3. **Given** a directory holding a mix of files, **When** the user opens it,
+   **Then** only the files that are duplicates are listed, each with the number
+   of times its content appears in the scan.
+4. **Given** any directory level, **When** the user sorts by duplicate count or
+   by duplicate size, **Then** the rows re-order accordingly, and clicking the
+   active column again reverses them.
+5. **Given** a path marked as ignored, **When** the user re-scans and returns to
+   this tab, **Then** the counts of every directory above it have dropped
+   accordingly — both tabs read the same result set.
+
+---
+
+### User Story 5 - Delete a duplicate copy (Priority: P3)
+
+Added after the feature shipped, at the user's request — and the first thing in
+this tool that touches the user's files.
+
+From the dialog listing where a content lives, each copy offers a Delete button.
+Pressing it does not delete anything yet: it asks the server what would happen
+and shows the answer — where the file would go, how many bytes that frees, and
+whether this was the second-to-last copy — and only a second, explicit click
+carries it out. "Delete" then means **move**: the file is relocated under the
+trash root with its whole original path recreated, so getting it back is a `mv`
+away.
+
+**Why this priority**: it closes the loop — finding duplicates is only useful if
+you can act on them — but it is P3 because it depends on everything else being
+right first, and because acting on the wrong file is the one mistake this tool
+could make that the user cannot undo by re-scanning.
+
+**Independent Test**: with a content duplicated three times, delete one copy and
+confirm the file is gone from its original path, present under the trash root at
+the same relative structure, and reported as two copies afterwards.
+
+**Acceptance Scenarios**:
+
+1. **Given** a content with three copies, **When** the user presses Delete on
+   one, **Then** nothing changes on disk until the preview is confirmed, and the
+   preview states the destination and the bytes freed.
+2. **Given** that preview, **When** the user confirms, **Then** the file is
+   moved to `<trash>/<its full original path>`, disappears from the dialog, and
+   the by-directory counts and sizes above it drop accordingly.
+3. **Given** a content down to two copies, **When** the user deletes one,
+   **Then** the remaining copy stops being a duplicate: the group leaves the
+   results and the dialog closes.
+4. **Given** a content with a single copy left, **When** anything asks to delete
+   it, **Then** the system refuses — the last copy is never deletable.
+5. **Given** a symlink, a directory, a path outside the scanned root, or a scan
+   in progress, **When** a deletion is requested, **Then** it is refused with
+   the reason.
+
+---
+
 ### Edge Cases
 
 - **Path does not exist, is not a directory, or cannot be read**: the scan does
@@ -293,6 +377,75 @@ the ignored-paths view, re-scan, and confirm the paths come back.
 - **FR-023**: The results, including the timestamp of the scan that produced
   them, MUST survive a page reload and a server restart.
 
+#### By-directory view (User Story 4)
+
+- **FR-031**: The results MUST be presented in two tabs — the by-directory view
+  and the checksum listing — and the chosen tab MUST be remembered across
+  sessions. The by-directory view is the default (user request): "which folder
+  is the problem" is the question worth opening on.
+- **FR-032**: Every directory row MUST show how many duplicates lie anywhere
+  beneath it and how many bytes those duplicates occupy, and the view MUST state
+  the current subtree's share of the scan's total.
+- **FR-033**: Files MUST be listed only when they are themselves one of the
+  duplicates found; ordinary files MUST NOT appear.
+- **FR-034**: A directory holding no duplicates MUST still be listed, showing 0,
+  and a checkbox MUST hide every such directory when the user asks for it.
+- **FR-035**: The listing MUST be sortable by duplicate count, by duplicate size
+  and by name, in either direction, and the choice MUST be remembered across
+  sessions.
+- **FR-036**: Navigation MUST start at the scanned root and move one directory
+  at a time, with a breadcrumb back to the root, and MUST NOT go above the root
+  — no results exist there.
+- **FR-037**: Both tabs MUST read the same persisted result set, so ignoring a
+  path lowers the by-directory counts exactly as it removes rows from the
+  checksum listing.
+
+**Counting rule**: a duplicated folder counts as one duplicate item carrying its
+whole subtree's size. Its inner files are already collapsed out of the result
+set (FR-015), so nothing is counted twice — except in the one case FR-015
+deliberately keeps: a file inside a duplicated folder that ALSO has a copy
+outside it stays reported in its own right, and therefore contributes its bytes
+both on its own and inside its folder's subtree size. That is a consequence of
+reporting both facts, not an accounting error, and it only arises for content
+duplicated across the folder boundary.
+
+- **FR-044**: The by-directory view MUST offer two independent filters — leave
+  out empty files, and leave out empty directories — and each MUST remove that
+  content from the counts and sizes as well as from the rows, since an empty
+  file is technically a duplicate of every other empty file and almost never
+  what the user is looking for. Both MUST be remembered across sessions. Hiding
+  the _row_ of a truly childless directory depends on the folder pass having
+  run; with folder detection off no row is hidden, because guessing would risk
+  hiding a directory that has content.
+
+#### Deleting a duplicate copy (User Story 5)
+
+- **FR-038**: From the occurrences dialog, each copy MUST offer to delete that
+  copy, and only for files — folders are never removed, since that would mean a
+  recursive delete.
+- **FR-039**: Deleting MUST be a two-step operation (constitution Principle V):
+  a dry-run that reports exactly what would change and touches nothing, then an
+  explicit confirmation of that preview. The preview MUST state the destination,
+  the bytes freed at the original location, and whether the group is about to
+  leave the results.
+- **FR-040**: The system MUST refuse to delete the last remaining copy of a
+  content (user rule). Once a single copy is left, the content is not duplicated
+  any more, its group leaves the results, and no deletion of that file may be
+  offered or accepted.
+- **FR-041**: The system MUST only delete paths the current scan reported, and
+  MUST refuse symlinks, directories, anything outside the scanned root, anything
+  already inside the trash area, and any request made while a scan is running.
+- **FR-042**: Deleting MUST move the file into a trash area, recreating its full
+  original path underneath — `/a/b/c/d.txt` becomes `<trash>/a/b/c/d.txt` — so
+  the operation is reversible by hand. Nothing may be overwritten there: a name
+  already taken gets a numeric suffix. The trash root defaults to the app's
+  `data/` directory (`/app/data` in the container) and is overridable with
+  `DUPLICATE_FINDER_TRASH_DIR`.
+- **FR-043**: After a deletion the results MUST be recomputed: the occurrence
+  disappears, the group's count drops, the group itself disappears when fewer
+  than two copies remain, and both the dialog and the by-directory listing MUST
+  reflect that without a re-scan.
+
 #### Ignore list
 
 - **FR-024**: The user MUST be able to mark any reported file or folder path as
@@ -311,9 +464,11 @@ the ignored-paths view, re-scan, and confirm the paths come back.
 
 #### Safety
 
-- **FR-029**: The feature MUST NOT create, modify, move, rename, or delete
-  anything on the scanned filesystem; the only mutation it performs is on its
-  own stored data.
+- **FR-029**: The feature MUST NOT modify, rename or erase anything on the
+  scanned filesystem. The single exception is the deletion of a duplicate copy
+  (User Story 5), which is a **move into the trash area**, never an erase —
+  revised from the original "no filesystem mutation at all" at the user's
+  request.
 - **FR-030**: The feature MUST NOT write to the directory comparison tool's
   stored data; it may only read from it.
 

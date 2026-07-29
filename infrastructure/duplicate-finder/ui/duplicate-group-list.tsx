@@ -234,6 +234,7 @@ export function DuplicateGroupList({
                     <li key={path} className="flex items-center gap-2 text-sm">
                       <CopyablePath
                         path={path}
+                        title={path}
                         className="min-w-0 flex-1 truncate text-xs"
                       />
                       <CopyButton

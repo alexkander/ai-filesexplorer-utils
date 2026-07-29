@@ -46,8 +46,9 @@ read as late and as rarely as possible:
 Everything is persisted in this feature's own SQLite database at
 `data/duplicate-finder.sqlite`, so results and the scan's own state survive a
 reload or a restart; the directory comparison tool's database is only ever
-opened read-only. No new runtime dependency, and no filesystem mutation of any
-kind.
+opened read-only. No new runtime dependency. The only filesystem mutation is
+User Story 5's deletion, which moves a duplicate copy into a trash area behind a
+dry-run and an explicit confirmation — nothing is ever erased.
 
 ## Technical Context
 
@@ -91,12 +92,13 @@ groups), SC-005 (Stop honoured within 2 s even mid-file — the abort signal
 reaches the read stream), SC-009 (a re-scan of an unchanged tree reuses every
 recorded checksum).
 
-**Constraints**: Strictly read-only on the scanned filesystem, so Principle V's
-dry-run/confirmation gate does not apply (FR-029). Never writes to the directory
-comparison tool's database (FR-030) — it is opened with `readonly: true` so the
-driver itself enforces it. Symlinks never followed (FR-011). Exactly one scan at
-a time within this tool (FR-008), independent of the other tools' scans.
-Single-user, no-auth.
+**Constraints**: Read-only on the scanned filesystem except for User Story 5's
+deletion, which moves a copy into the trash area behind Principle V's dry-run +
+confirmation gate (FR-029, FR-039). Never writes to the directory comparison
+tool's database (FR-030) — it is opened with `readonly: true` so the driver
+itself enforces it. Symlinks never followed (FR-011). Exactly one scan at a time
+within this tool (FR-008), independent of the other tools' scans. Single-user,
+no-auth.
 
 **Scale/Scope**: Unbounded in principle — the scanned root may hold millions of
 files. The design keeps memory bounded by pushing every set operation into SQL
@@ -108,15 +110,15 @@ lists in the worker.
 _GATE: Must pass before Phase 0 research. Re-checked after Phase 1 design — see
 note below._
 
-| Principle                                                                                            | Status | Notes                                                                                                                                                                                                                                                                                                                                                                                                                                                |
-| ---------------------------------------------------------------------------------------------------- | ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| I. Simplicity First (YAGNI)                                                                          | PASS   | No new dependency. One result set at a time instead of a scan-history model (research.md Decision 8). No delete/move/export. Sorting is two buttons rather than a new Select primitive. The folder-candidacy pruning replaces what would otherwise be a second full-hash pass rather than adding a caching layer.                                                                                                                                    |
-| II. Hexagonal Architecture                                                                           | PASS   | `domain/duplicate-finder/` holds only pure rules (Merkle derivation, folder candidacy, the collapsing rule, ignore matching) with no `fs`/SQL/React imports; `application/duplicate-finder/` defines three ports (`ChecksumPort`, `DuplicateRepositoryPort`, `ChecksumCachePort`) and the use cases over them; `infrastructure/duplicate-finder/` holds the only `fs`, `crypto`, `better-sqlite3` and React code. `app/` routes and pages stay thin. |
-| III. SOLID                                                                                           | PASS   | `ChecksumPort` deliberately omits the comparison tool's Office-container method (interface segregation — this feature never needs it). `ChecksumCachePort` is a single-method read-only capability, substitutable by a null implementation when the other tool's database is absent. Phases are separate use-case modules, so a change to the hashing cascade does not touch the grouping or collapsing code.                                        |
-| IV. No Automated Tests                                                                               | PASS   | No test files, no test tasks; [quickstart.md](./quickstart.md) carries the manual verification script.                                                                                                                                                                                                                                                                                                                                               |
-| V. Safe-by-Default Destructive Operations                                                            | N/A    | The feature never creates, moves, renames, overwrites or deletes anything on the scanned filesystem (FR-029). The only mutations are rows in its own database.                                                                                                                                                                                                                                                                                       |
-| VI. Conventional Commits                                                                             | PASS   | Enforced at commit time; no plan-level impact.                                                                                                                                                                                                                                                                                                                                                                                                       |
-| Tech constraints (Next.js/React/TS strict, shadcn/ui + Tailwind, pnpm, English, single-user/no-auth) | PASS   | No new UI library and no new runtime dependency, so `pnpm-lock.yaml` is untouched. All artifacts and UI copy in English. No auth.                                                                                                                                                                                                                                                                                                                    |
+| Principle                                                                                            | Status | Notes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| ---------------------------------------------------------------------------------------------------- | ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| I. Simplicity First (YAGNI)                                                                          | PASS   | No new dependency. One result set at a time instead of a scan-history model (research.md Decision 8). No delete/move/export. Sorting is two buttons rather than a new Select primitive. The folder-candidacy pruning replaces what would otherwise be a second full-hash pass rather than adding a caching layer.                                                                                                                                                                                                                                                                                                                                                                                                      |
+| II. Hexagonal Architecture                                                                           | PASS   | `domain/duplicate-finder/` holds only pure rules (Merkle derivation, folder candidacy, the collapsing rule, ignore matching) with no `fs`/SQL/React imports; `application/duplicate-finder/` defines three ports (`ChecksumPort`, `DuplicateRepositoryPort`, `ChecksumCachePort`) and the use cases over them; `infrastructure/duplicate-finder/` holds the only `fs`, `crypto`, `better-sqlite3` and React code. `app/` routes and pages stay thin.                                                                                                                                                                                                                                                                   |
+| III. SOLID                                                                                           | PASS   | `ChecksumPort` deliberately omits the comparison tool's Office-container method (interface segregation — this feature never needs it). `ChecksumCachePort` is a single-method read-only capability, substitutable by a null implementation when the other tool's database is absent. Phases are separate use-case modules, so a change to the hashing cascade does not touch the grouping or collapsing code.                                                                                                                                                                                                                                                                                                          |
+| IV. No Automated Tests                                                                               | PASS   | No test files, no test tasks; [quickstart.md](./quickstart.md) carries the manual verification script.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| V. Safe-by-Default Destructive Operations                                                            | PASS   | Applies since User Story 5 added deletion. Three layers satisfy it: the operation is a **move into a trash area**, never an erase (FR-042), so it is undoable by hand; every deletion runs a **dry-run first** that reports the exact destination, bytes and resulting group state without touching anything, and the UI requires explicit confirmation of that preview (FR-039); and the endpoint defaults to `dryRun: true`, so a request that forgets the flag cannot delete. The refusal list (FR-040, FR-041) blocks the last copy, symlinks, a kind that no longer matches the results, paths outside the scan, paths already in the trash, a folder containing the trash root, and anything requested mid-scan. |
+| VI. Conventional Commits                                                                             | PASS   | Enforced at commit time; no plan-level impact.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| Tech constraints (Next.js/React/TS strict, shadcn/ui + Tailwind, pnpm, English, single-user/no-auth) | PASS   | No new UI library and no new runtime dependency, so `pnpm-lock.yaml` is untouched. All artifacts and UI copy in English. No auth.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 
 No violations. The Complexity Tracking table is omitted (nothing to justify).
 
@@ -163,6 +165,7 @@ domain/
 │   ├── derive-directory-checksum.ts   # Merkle hash over name-sorted children (local copy)
 │   ├── directory-candidacy.ts         # "can this directory possibly have a twin?" pruning rule
 │   ├── collapse-nested-groups.ts      # FR-015: which groups a folder group fully explains
+│   ├── directory-row.ts               # by-directory row type + its ordering (US4)
 │   ├── duplicate-group.ts             # group/occurrence types + sort keys
 │   └── ignored-path-match.ts          # exact-or-subtree matching used during the walk
 ├── scanning/                          # reused unchanged (shared module)
@@ -183,6 +186,7 @@ application/
 │   ├── start-scan.ts / stop-scan.ts / get-scan-status.ts
 │   ├── list-duplicate-groups.ts       # paginated + sorted listing
 │   ├── list-group-occurrences.ts      # paths for one expanded group
+│   ├── list-directory-duplicates.ts   # one level of the by-directory tab (US4)
 │   ├── set-ignored.ts                 # mark/unmark + prune current results
 │   └── list-ignored-paths.ts
 └── scanning/                          # reused unchanged (shared module)
@@ -200,6 +204,8 @@ infrastructure/
 │       ├── duplicate-finder-view.tsx  # form + status panel + listing
 │       ├── scan-status-panel.tsx
 │       ├── duplicate-group-list.tsx   # rows, expansion, ignore action, pagination
+│       ├── directory-duplicates-view.tsx  # by-directory tab: breadcrumb, counts, filter
+│       ├── copy-button.tsx            # copy a path / its containing folder
 │       ├── ignored-paths-view.tsx
 │       ├── use-scan-status.ts         # polling hook
 │       └── format-size.ts             # local copy (see cross-slice note)
@@ -215,6 +221,7 @@ app/
     ├── stop/route.ts          # POST  cancel
     ├── groups/route.ts        # GET   paginated + sorted groups
     ├── occurrences/route.ts   # GET   paths of one group
+    ├── directory/route.ts     # GET   one level of the by-directory tab
     ├── ignore/route.ts        # POST  mark / unmark
     └── ignored-paths/route.ts # GET   the ignore list
 ```

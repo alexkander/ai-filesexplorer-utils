@@ -50,6 +50,16 @@ interface DuplicateRepositoryPort {
   listOccurrences(checksum: string, kind: GroupKind): string[];
   countGroups(): number;
 
+  // ---- reads for the by-directory view --------------------------------
+  listChildDirectories(path: string): string[];
+  aggregateDuplicatesByChild(path: string): ChildDuplicateAggregate[];
+  listDirectDuplicateChildren(path: string): DirectDuplicateChild[];
+  getDuplicateTotals(): { count: number; size: number };
+
+  // ---- deletion -------------------------------------------------------
+  findOccurrenceByPath(path: string): OccurrenceLookup | null;
+  removeDeletedFile(path: string): PruneCounts;
+
   // ---- ignore list ---------------------------------------------------
   listIgnoredPaths(): IgnoredPath[];
   loadIgnoredPathSet(): Set<string>;
@@ -103,6 +113,24 @@ Shape notes settled during implementation:
   step. `setIgnored(path, false)` only removes the ignore row — it never
   resurrects results, which is why FR-027 says an un-ignored path comes back on
   the _next_ scan.
+- **The by-directory reads cost what is under the path, not what is in the
+  scan.** `aggregateDuplicatesByChild` and `listDirectDuplicateChildren` select
+  on `path >= prefix AND path < prefix-with-'/'-bumped-to-'0'`, a prefix range
+  SQLite serves straight from the index on `duplicate_occurrences(path)`. A
+  `LIKE 'prefix%'` would only use that index with `case_sensitive_like` turned
+  on and would otherwise degrade to a full scan, so the range form is used
+  instead — it also sidesteps escaping `%` and `_`, both legal in a filename.
+  The rollup to "which direct child does this occurrence belong to" happens in
+  the same `GROUP BY`, so one level costs one scan of its own subtree.
+- **`listChildDirectories` is what makes a zero visible**: directories with no
+  duplicates appear nowhere in the occurrence table, so the row list is built
+  from the scan's directory rows and the aggregates are joined onto it (FR-034).
+- **`findOccurrenceByPath` is the deletion gate**: returning null means the path
+  is not part of the current result set, which is what stops anything the scan
+  did not report from ever being deleted. `removeDeletedFile` then forgets the
+  file — its cached facts, its occurrence, and the group itself when fewer than
+  two copies remain — in one transaction, and never touches the filesystem: the
+  caller has already moved the file.
 - **Every result read is scoped to the current scan.** `listGroups`,
   `listOccurrences` and the group `total` all filter on `scan_state.scan_seq`,
   so results written by an earlier scan of a different root are invisible the

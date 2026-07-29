@@ -4,29 +4,57 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { ScanLine } from 'lucide-react';
 import { Button } from '@/infrastructure/ui/components/button';
+import type { DirectorySortBy } from '@/domain/duplicate-finder/directory-row';
 import type {
   SortBy,
   SortDir,
 } from '@/domain/duplicate-finder/duplicate-group';
+import { cn } from '@/lib/utils';
 import {
+  loadDirectorySortBy,
+  loadDirectorySortDir,
+  loadExcludeEmptyDirectories,
+  loadExcludeEmptyFiles,
+  loadHideEmptyDirectories,
   loadIncludeFolders,
   loadLastPath,
   loadSortBy,
   loadSortDir,
+  loadTab,
+  saveDirectorySortBy,
+  saveDirectorySortDir,
+  saveExcludeEmptyDirectories,
+  saveExcludeEmptyFiles,
+  saveHideEmptyDirectories,
   saveIncludeFolders,
   saveLastPath,
   saveSortBy,
   saveSortDir,
+  saveTab,
+  type DuplicateFinderTab,
 } from '../scan-preferences-storage';
+import { DirectoryDuplicatesView } from './directory-duplicates-view';
 import { DuplicateGroupList } from './duplicate-group-list';
 import { ScanStatusPanel } from './scan-status-panel';
 import { useScanStatus } from './use-scan-status';
+
+const TABS: { value: DuplicateFinderTab; label: string }[] = [
+  { value: 'directories', label: 'By directory' },
+  { value: 'duplicates', label: 'Duplicates' },
+];
 
 export function DuplicateFinderView() {
   const [rootPath, setRootPath] = useState('');
   const [includeFolders, setIncludeFolders] = useState(false);
   const [sortBy, setSortBy] = useState<SortBy>('size');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
+  const [tab, setTab] = useState<DuplicateFinderTab>('directories');
+  const [directorySortBy, setDirectorySortBy] =
+    useState<DirectorySortBy>('count');
+  const [directorySortDir, setDirectorySortDir] = useState<SortDir>('desc');
+  const [hideEmpty, setHideEmpty] = useState(false);
+  const [excludeEmptyFiles, setExcludeEmptyFiles] = useState(false);
+  const [excludeEmptyDirectories, setExcludeEmptyDirectories] = useState(false);
   const { status, starting, error, tick, scan, stop, refetch } =
     useScanStatus();
 
@@ -39,6 +67,12 @@ export function DuplicateFinderView() {
     setIncludeFolders(loadIncludeFolders());
     setSortBy(loadSortBy());
     setSortDir(loadSortDir());
+    setTab(loadTab());
+    setDirectorySortBy(loadDirectorySortBy());
+    setDirectorySortDir(loadDirectorySortDir());
+    setHideEmpty(loadHideEmptyDirectories());
+    setExcludeEmptyFiles(loadExcludeEmptyFiles());
+    setExcludeEmptyDirectories(loadExcludeEmptyDirectories());
   }, []);
 
   const handleScan = () => {
@@ -52,6 +86,36 @@ export function DuplicateFinderView() {
     setSortDir(nextDir);
     saveSortBy(nextBy);
     saveSortDir(nextDir);
+  };
+
+  const handleTabChange = (next: DuplicateFinderTab) => {
+    setTab(next);
+    saveTab(next);
+  };
+
+  const handleDirectorySortChange = (
+    nextBy: DirectorySortBy,
+    nextDir: SortDir,
+  ) => {
+    setDirectorySortBy(nextBy);
+    setDirectorySortDir(nextDir);
+    saveDirectorySortBy(nextBy);
+    saveDirectorySortDir(nextDir);
+  };
+
+  const handleHideEmptyChange = (next: boolean) => {
+    setHideEmpty(next);
+    saveHideEmptyDirectories(next);
+  };
+
+  const handleExcludeEmptyFilesChange = (next: boolean) => {
+    setExcludeEmptyFiles(next);
+    saveExcludeEmptyFiles(next);
+  };
+
+  const handleExcludeEmptyDirectoriesChange = (next: boolean) => {
+    setExcludeEmptyDirectories(next);
+    saveExcludeEmptyDirectories(next);
   };
 
   const isRunning = status?.state === 'running';
@@ -118,13 +182,56 @@ export function DuplicateFinderView() {
       />
 
       {hasResults ? (
-        <DuplicateGroupList
-          sortBy={sortBy}
-          sortDir={sortDir}
-          onSortChange={handleSortChange}
-          refreshKey={tick}
-          onResultsChanged={() => void refetch()}
-        />
+        <div className="flex flex-col gap-3">
+          <div
+            role="tablist"
+            aria-label="Result views"
+            className="flex gap-1 border-b"
+          >
+            {TABS.map((entry) => (
+              <button
+                key={entry.value}
+                type="button"
+                role="tab"
+                aria-selected={tab === entry.value}
+                onClick={() => handleTabChange(entry.value)}
+                className={cn(
+                  '-mb-px border-b-2 px-3 py-1.5 text-sm',
+                  tab === entry.value
+                    ? 'border-primary font-medium text-foreground'
+                    : 'border-transparent text-muted-foreground hover:text-foreground',
+                )}
+              >
+                {entry.label}
+              </button>
+            ))}
+          </div>
+
+          {tab === 'duplicates' ? (
+            <DuplicateGroupList
+              sortBy={sortBy}
+              sortDir={sortDir}
+              onSortChange={handleSortChange}
+              refreshKey={tick}
+              onResultsChanged={() => void refetch()}
+            />
+          ) : (
+            <DirectoryDuplicatesView
+              sortBy={directorySortBy}
+              sortDir={directorySortDir}
+              hideEmpty={hideEmpty}
+              excludeEmptyFiles={excludeEmptyFiles}
+              excludeEmptyDirectories={excludeEmptyDirectories}
+              onSortChange={handleDirectorySortChange}
+              onHideEmptyChange={handleHideEmptyChange}
+              onExcludeEmptyFilesChange={handleExcludeEmptyFilesChange}
+              onExcludeEmptyDirectoriesChange={
+                handleExcludeEmptyDirectoriesChange
+              }
+              refreshKey={tick}
+            />
+          )}
+        </div>
       ) : (
         <p className="py-8 text-center text-sm text-muted-foreground">
           {!hasRunAScan

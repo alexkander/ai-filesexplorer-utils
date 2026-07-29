@@ -104,6 +104,40 @@ export interface GroupQuery {
   limit: number;
 }
 
+/** What the by-directory view leaves out of both its rows and its counts
+ * (spec FR-044): the zero-byte-file group and the empty-folder group are
+ * technically duplicates of each other but rarely what the user is hunting. */
+export interface DuplicateFilters {
+  excludeEmptyFiles: boolean;
+  excludeEmptyDirectories: boolean;
+}
+
+export interface ChildDuplicateAggregate {
+  /** The direct child of the queried directory an occurrence rolls up to —
+   * the subdirectory it sits under, or the file itself. */
+  childPath: string;
+  count: number;
+  size: number;
+}
+
+export interface DirectDuplicateChild {
+  path: string;
+  kind: GroupKind;
+  checksum: string;
+  size: number;
+  occurrenceCount: number;
+  isEmpty: boolean;
+}
+
+export interface OccurrenceLookup {
+  checksum: string;
+  kind: GroupKind;
+  /** Bytes one occurrence takes — what deleting this copy frees. */
+  size: number;
+  /** How many copies the group still has, this one included. */
+  occurrenceCount: number;
+}
+
 export interface IgnoredPath {
   path: string;
   ignoredAt: string;
@@ -173,6 +207,51 @@ export interface DuplicateRepositoryPort {
   listGroups(query: GroupQuery): { groups: DuplicateGroup[]; total: number };
   listOccurrences(checksum: string, kind: GroupKind): string[];
   countGroups(): number;
+
+  // ---- reads for the by-directory view ----------------------------------
+  /** Every directory recorded directly under `path`, duplicates or not —
+   * this is what lets the view show a clean directory with a 0 (FR-034). */
+  listChildDirectories(path: string, filters: DuplicateFilters): string[];
+  /**
+   * Duplicates beneath `path`, rolled up to whichever direct child of `path`
+   * they belong to. One indexed range scan over the occurrence paths, so the
+   * cost is proportional to what is under `path`, not to the whole result
+   * set.
+   */
+  aggregateDuplicatesByChild(
+    path: string,
+    filters: DuplicateFilters,
+  ): ChildDuplicateAggregate[];
+  /** The direct children of `path` that are themselves duplicates, with the
+   * group metadata a row needs to be cross-referenced. */
+  listDirectDuplicateChildren(
+    path: string,
+    filters: DuplicateFilters,
+  ): DirectDuplicateChild[];
+  /** Totals across the whole current result set, for the "N of M" share. */
+  getDuplicateTotals(filters: DuplicateFilters): {
+    count: number;
+    size: number;
+  };
+
+  // ---- deletion ---------------------------------------------------------
+  /** The group a reported path belongs to, or null when it is not part of
+   * the current result set — which is also the check that stops anything
+   * outside what the scan reported from ever being deleted. */
+  findOccurrenceByPath(path: string): OccurrenceLookup | null;
+  /**
+   * Forgets a file this feature just deleted from disk: its cached facts,
+   * its occurrence, and the group itself when fewer than two copies remain.
+   * Never touches the filesystem — the caller has already done that.
+   */
+  removeDeletedFile(path: string): PruneCounts;
+  /**
+   * Same, for a directory this feature just moved away: everything at or
+   * beneath it is forgotten. Occurrences below it matter — a file inside a
+   * duplicated folder that ALSO had a copy elsewhere is reported in its own
+   * right (FR-015), and moving the folder takes it along.
+   */
+  removeDeletedDirectory(path: string): PruneCounts;
 
   // ---- ignore list ------------------------------------------------------
   listIgnoredPaths(): IgnoredPath[];

@@ -1,5 +1,6 @@
 import type {
   DirectChildren,
+  DuplicateFilters,
   DirectoryFacts,
   DirectoryResult,
   DirectoryRow,
@@ -414,6 +415,125 @@ const listOccurrencesStmt = db.prepare(`
   ORDER BY path
 `);
 
+// ---- reads for the by-directory view ---------------------------------------
+
+// `is_candidate IS NOT NULL` is the "the folder pass ran for this row" signal,
+// so `child_count = 0` can be trusted as "really empty". With folder detection
+// off the column is never filled and nothing is hidden, which is the safe way
+// round: better to show a directory than to hide one on a guess.
+const listChildDirectoriesStmt = db.prepare(`
+  SELECT path FROM scanned_directories
+  WHERE parent_path = @path AND scan_seq = ${CURRENT_SCAN_SEQ}
+    AND NOT (
+      @excludeEmptyDirectories = 1
+      AND is_candidate IS NOT NULL
+      AND child_count = 0
+    )
+`);
+
+// `path >= @from AND path < @to` is a prefix range, which SQLite serves from
+// the index on duplicate_occurrences(path). A `LIKE 'prefix%'` would read the
+// same rows only if `case_sensitive_like` were on, and would otherwise
+// degrade to a full scan — the range form needs no such assumption. `@to` is
+// the prefix with its trailing '/' bumped to '0' (the next codepoint), so it
+// covers exactly the subtree and nothing else.
+const aggregateDuplicatesByChildStmt = db.prepare(`
+  SELECT
+    CASE
+      WHEN instr(substr(o.path, @prefixLength + 1), '/') > 0
+      THEN substr(
+        o.path,
+        1,
+        @prefixLength + instr(substr(o.path, @prefixLength + 1), '/') - 1
+      )
+      ELSE o.path
+    END AS child_path,
+    COUNT(*) AS count,
+    SUM(g.size) AS size
+  FROM duplicate_occurrences o
+  JOIN duplicate_groups g
+    ON g.checksum = o.checksum AND g.kind = o.kind
+  WHERE o.scan_seq = ${CURRENT_SCAN_SEQ}
+    AND o.path >= @from AND o.path < @to
+    AND NOT (@excludeEmptyFiles = 1 AND o.kind = 'file' AND g.is_empty = 1)
+    AND NOT (@excludeEmptyDirectories = 1 AND o.kind = 'directory' AND g.is_empty = 1)
+  GROUP BY child_path
+`);
+
+const listDirectDuplicateChildrenStmt = db.prepare(`
+  SELECT o.path, o.kind, o.checksum, g.size, g.occurrence_count, g.is_empty
+  FROM duplicate_occurrences o
+  JOIN duplicate_groups g
+    ON g.checksum = o.checksum AND g.kind = o.kind
+  WHERE o.scan_seq = ${CURRENT_SCAN_SEQ}
+    AND o.path >= @from AND o.path < @to
+    AND instr(substr(o.path, @prefixLength + 1), '/') = 0
+    AND NOT (@excludeEmptyFiles = 1 AND o.kind = 'file' AND g.is_empty = 1)
+    AND NOT (@excludeEmptyDirectories = 1 AND o.kind = 'directory' AND g.is_empty = 1)
+
+`);
+
+const getDuplicateTotalsStmt = db.prepare(`
+  SELECT COUNT(*) AS count, COALESCE(SUM(g.size), 0) AS size
+  FROM duplicate_occurrences o
+  JOIN duplicate_groups g
+    ON g.checksum = o.checksum AND g.kind = o.kind
+  WHERE o.scan_seq = ${CURRENT_SCAN_SEQ}
+    AND NOT (@excludeEmptyFiles = 1 AND o.kind = 'file' AND g.is_empty = 1)
+    AND NOT (@excludeEmptyDirectories = 1 AND o.kind = 'directory' AND g.is_empty = 1)
+`);
+
+/** SQLite has no boolean type, so the flags cross the boundary as 0/1. */
+function toFilterParams(filters: DuplicateFilters) {
+  return {
+    excludeEmptyFiles: filters.excludeEmptyFiles ? 1 : 0,
+    excludeEmptyDirectories: filters.excludeEmptyDirectories ? 1 : 0,
+  };
+}
+
+/** Half-open key range covering everything strictly beneath `path`. */
+function subtreeRange(path: string): {
+  from: string;
+  to: string;
+  prefixLength: number;
+} {
+  const prefix = path === '/' ? '/' : `${path}/`;
+  return {
+    from: prefix,
+    // '/' + 1 === '0', so this is the first key past the subtree.
+    to: `${prefix.slice(0, -1)}0`,
+    prefixLength: prefix.length,
+  };
+}
+
+// ---- deletion --------------------------------------------------------------
+
+const findOccurrenceByPathStmt = db.prepare(`
+  SELECT o.checksum, o.kind, g.size, g.occurrence_count
+  FROM duplicate_occurrences o
+  JOIN duplicate_groups g
+    ON g.checksum = o.checksum AND g.kind = o.kind
+  WHERE o.path = @path AND o.scan_seq = ${CURRENT_SCAN_SEQ}
+`);
+
+const deleteScannedFileStmt = db.prepare(
+  `DELETE FROM scanned_files WHERE path = @path`,
+);
+
+const deleteOccurrenceAtPathStmt = db.prepare(
+  `DELETE FROM duplicate_occurrences WHERE path = @path`,
+);
+
+const deleteScannedFilesUnderStmt = db.prepare(`
+  DELETE FROM scanned_files
+  WHERE path = @path OR path LIKE @likePattern ESCAPE '\\'
+`);
+
+const deleteScannedDirectoriesUnderStmt = db.prepare(`
+  DELETE FROM scanned_directories
+  WHERE path = @path OR path LIKE @likePattern ESCAPE '\\'
+`);
+
 // ---- ignore list ----------------------------------------------------------
 
 const listIgnoredPathsStmt = db.prepare(`
@@ -487,6 +607,38 @@ function groupsWithPaths(
     isEmpty: isEmpty(row),
     paths: pathsByChecksum.get(row.checksum) ?? [],
   }));
+}
+
+/**
+ * Removes every occurrence at or beneath `path` and repairs the groups they
+ * belonged to, deleting any left with fewer than two copies. Shared by
+ * "ignore this path" and "this directory was moved away": both make the same
+ * subtree stop existing as far as the results are concerned.
+ *
+ * MUST run inside a transaction — the affected groups are read before their
+ * occurrences are deleted, because afterwards there is nothing left to derive
+ * them from.
+ */
+function pruneResultsUnder(path: string, likePattern: string): PruneCounts {
+  const affected = findAffectedGroupsStmt.all({ path, likePattern }) as {
+    checksum: string;
+    kind: GroupKind;
+  }[];
+  let removedOccurrences = deleteOccurrencesUnderStmt.run({
+    path,
+    likePattern,
+  }).changes;
+
+  let removedGroups = 0;
+  for (const group of affected) {
+    recountGroupStmt.run(group);
+    const deleted = deleteGroupIfBelowTwoStmt.run(group).changes;
+    if (deleted > 0) {
+      removedGroups += deleted;
+      removedOccurrences += deleteRemainingOccurrencesStmt.run(group).changes;
+    }
+  }
+  return { removedGroups, removedOccurrences };
 }
 
 export const duplicateRepositoryAdapter: DuplicateRepositoryPort = {
@@ -735,6 +887,112 @@ export const duplicateRepositoryAdapter: DuplicateRepositoryPort = {
 
   countGroups() {
     return (countGroupsStmt.get() as { total: number }).total;
+  },
+
+  listChildDirectories(path: string, filters: DuplicateFilters) {
+    const rows = listChildDirectoriesStmt.all({
+      path,
+      ...toFilterParams(filters),
+    }) as { path: string }[];
+    return rows.map((row) => row.path);
+  },
+
+  aggregateDuplicatesByChild(path: string, filters: DuplicateFilters) {
+    const rows = aggregateDuplicatesByChildStmt.all({
+      ...subtreeRange(path),
+      ...toFilterParams(filters),
+    }) as { child_path: string; count: number; size: number }[];
+    return rows.map((row) => ({
+      childPath: row.child_path,
+      count: row.count,
+      size: row.size,
+    }));
+  },
+
+  listDirectDuplicateChildren(path: string, filters: DuplicateFilters) {
+    const rows = listDirectDuplicateChildrenStmt.all({
+      ...subtreeRange(path),
+      ...toFilterParams(filters),
+    }) as {
+      path: string;
+      kind: GroupKind;
+      checksum: string;
+      size: number;
+      occurrence_count: number;
+      is_empty: number;
+    }[];
+    return rows.map((row) => ({
+      path: row.path,
+      kind: row.kind,
+      checksum: row.checksum,
+      size: row.size,
+      occurrenceCount: row.occurrence_count,
+      isEmpty: row.is_empty === 1,
+    }));
+  },
+
+  getDuplicateTotals(filters: DuplicateFilters) {
+    return getDuplicateTotalsStmt.get(toFilterParams(filters)) as {
+      count: number;
+      size: number;
+    };
+  },
+
+  findOccurrenceByPath(path: string) {
+    const row = findOccurrenceByPathStmt.get({ path }) as
+      | {
+          checksum: string;
+          kind: GroupKind;
+          size: number;
+          occurrence_count: number;
+        }
+      | undefined;
+    if (!row) return null;
+    return {
+      checksum: row.checksum,
+      kind: row.kind,
+      size: row.size,
+      occurrenceCount: row.occurrence_count,
+    };
+  },
+
+  removeDeletedDirectory(path: string): PruneCounts {
+    const likePattern = subtreeLikePattern(path);
+    const tx = db.transaction((): PruneCounts => {
+      const counts = pruneResultsUnder(path, likePattern);
+      // The cached facts for everything under it go too: those paths do not
+      // exist any more, and a later scan must not reuse their checksums.
+      deleteScannedFilesUnderStmt.run({ path, likePattern });
+      deleteScannedDirectoriesUnderStmt.run({ path, likePattern });
+      return counts;
+    });
+    return tx();
+  },
+
+  removeDeletedFile(path: string): PruneCounts {
+    const tx = db.transaction((): PruneCounts => {
+      const affected = findOccurrenceByPathStmt.get({ path }) as
+        { checksum: string; kind: GroupKind } | undefined;
+
+      // The cached facts go too: leaving them would keep a checksum for a
+      // path that no longer exists, and the by-directory view would keep
+      // counting a file that is gone.
+      deleteScannedFileStmt.run({ path });
+      let removedOccurrences = deleteOccurrenceAtPathStmt.run({ path }).changes;
+      if (!affected) return { removedGroups: 0, removedOccurrences };
+
+      recountGroupStmt.run(affected);
+      const removedGroups = deleteGroupIfBelowTwoStmt.run(affected).changes;
+      if (removedGroups > 0) {
+        // One copy left is not a duplicate any more, so the group and its
+        // last occurrence leave the result set together — which is also what
+        // makes that last file impossible to delete from this UI.
+        removedOccurrences +=
+          deleteRemainingOccurrencesStmt.run(affected).changes;
+      }
+      return { removedGroups, removedOccurrences };
+    });
+    return tx();
   },
 
   listIgnoredPaths(): IgnoredPath[] {

@@ -1,4 +1,5 @@
 import { isIgnored } from '@/domain/duplicate-finder/ignored-path-match';
+import { normalizeScanPath } from '@/domain/duplicate-finder/normalize-path';
 import type { DuplicateRepositoryPort } from './duplicate-repository-port';
 import type { PathInspectionPort } from './path-inspection-port';
 import type { ScanWorkerPort } from './scan-worker-port';
@@ -30,8 +31,13 @@ export interface StartScanParams {
 export async function startScan(
   params: StartScanParams,
 ): Promise<StartScanOutcome> {
-  const { rootPath, includeFolders, repository, pathInspection, worker } =
-    params;
+  const { includeFolders, repository, pathInspection, worker } = params;
+
+  // Canonical form before anything records it: every later comparison is a
+  // string comparison against paths the filesystem walk produced, and those
+  // never carry a trailing slash. Scanning "/data/photos/" would otherwise
+  // store a root no child's `parent_path` can ever match.
+  const rootPath = normalizeScanPath(params.rootPath);
 
   // Checked first: a running scan makes every other check moot, and a
   // second request must never disturb it (spec FR-008).
