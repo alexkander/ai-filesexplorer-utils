@@ -1,7 +1,7 @@
 # ai-filesexplorer-utils
 
 Web utilities for organizing files: file counts per directory, content checksum
-tracking, folder synchronization, and more.
+tracking, directory comparison, duplicate finding, and more.
 
 ## Requirements
 
@@ -42,8 +42,8 @@ container so they don't clash with the host's.
 ## Development with Dev Containers
 
 `.devcontainer/devcontainer.json` (VS Code Dev Containers extension) is
-independent from the `Dockerfile` and `docker-compose.yml` above: it starts
-from the plain `node:22-bookworm-slim` base image and runs
+independent from the `Dockerfile` and `docker-compose.yml` above: it starts from
+the plain `node:22-bookworm-slim` base image and runs
 `corepack enable && pnpm install --frozen-lockfile` via `postCreateCommand`.
 `node_modules` and `.next` are kept in named volumes
 (`ai-filesexplorer-utils-node_modules`, `ai-filesexplorer-utils-next`) so they
@@ -68,9 +68,17 @@ mapping (no `network_mode: host`, no bind mounts).
 
 ## Environment variables
 
-The project currently doesn't require any environment variables to run.
+None are required to run the app. Two kinds are supported:
 
-If any are added in the future, follow the Next.js convention:
+- `PORT` — the port the app listens on (read natively by `next dev`/`next start`
+  and threaded through both Compose files). Defaults to `3000`.
+- One database path override per tool, each defaulting to a file under `data/`:
+  `COUNT_AND_SIZE_DB_PATH`, `DIRECTORY_COMPARISON_DB_PATH` and
+  `DUPLICATE_FINDER_DB_PATH`. Point them at a throwaway file when trying
+  something out — those databases hold hours of checksum work and nothing in the
+  app ever recreates them for you.
+
+If more are added in the future, follow the Next.js convention:
 
 - `.env.local` for local values (not versioned, add to `.gitignore`)
 - `NEXT_PUBLIC_` prefix only for variables that must be exposed to the

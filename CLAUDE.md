@@ -6,10 +6,12 @@ code in this repository.
 ## Overview
 
 Next.js 16 (App Router) + React 19 + TypeScript project, package-managed with
-pnpm. Web utilities for organizing files (file counts per directory, content
-checksums, folder sync, etc. — per the README) — the app is currently an
-early-stage scaffold (`app/page.tsx` / `app/layout.tsx` only, no routes, no
-tests yet).
+pnpm. Web utilities for organizing files, built as independent tools reachable
+from a shared dashboard shell: **Count and Size** (per-directory file counts and
+sizes), **Compare Directories** (side-by-side comparison of two trees via
+content checksums) and **Find Duplicates** (duplicate files and folders inside
+one directory). There is no test suite — see "Testing" below and the
+constitution's Principle IV.
 
 ## Commands
 
@@ -65,7 +67,35 @@ repo root.
 
 ## Architecture
 
-- `app/` — Next.js App Router pages/layouts.
-- No environment variables are required currently; if any are added, follow
-  Next.js convention (`.env.local` for local values, `NEXT_PUBLIC_` prefix only
-  for values that must reach the browser).
+Hexagonal, sliced per feature (see `.specify/memory/constitution.md`, Principle
+II). Dependencies point inward: `infrastructure` → `application` → `domain`.
+
+- `domain/` — pure rules, no `fs`/SQL/React imports. One directory per feature
+  (`count-and-size/`, `directory-comparison/`, `duplicate-finder/`,
+  `navigation/`), plus the shared `scanning/` module.
+- `application/` — use cases and the ports (TypeScript interfaces) they depend
+  on, same per-feature split, plus shared `scanning/` ports.
+- `infrastructure/` — the only place with `fs`, `crypto`, `better-sqlite3` and
+  React components. Each feature owns its SQLite client, adapters, background
+  worker and `ui/` components.
+- `app/` — App Router pages and Route Handlers only; they call one use case and
+  render an `infrastructure/ui` component, nothing more.
+
+**Cross-slice rule**: a feature slice does not import from another feature's
+slice. The only intentional exception is the shared `scanning` module; small
+helpers (size formatting, checksum derivation) are deliberately duplicated
+instead. Reading another tool's data is done through a read-only overlay adapter
+that lives in the _consuming_ slice (e.g.
+`infrastructure/duplicate-finder/comparison-checksum-readonly-adapter.ts`).
+
+Each tool keeps its own SQLite database under `data/`, and each one can be
+redirected at a throwaway file — always do this when testing by hand, never
+point them at the real `data/` files:
+
+- `COUNT_AND_SIZE_DB_PATH` → `data/count-and-size.sqlite`
+- `DIRECTORY_COMPARISON_DB_PATH` → `data/directory-comparison.sqlite`
+- `DUPLICATE_FINDER_DB_PATH` → `data/duplicate-finder.sqlite`
+
+Any other environment variable should follow Next.js convention (`.env.local`
+for local values, `NEXT_PUBLIC_` prefix only for values that must reach the
+browser).
