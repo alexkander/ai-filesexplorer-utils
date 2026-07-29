@@ -382,6 +382,23 @@ What was actually run, so the gaps are visible rather than assumed:
   real `data/*.sqlite` files around a production scan is part of the open T051
   run.
 
+### Follow-ups after the first commit (user requests, 2026-07-29)
+
+Three listing changes, all re-verified against a rebuilt production server:
+
+- A **type column** spelling out `File` / `Folder` next to each checksum
+  (FR-020a). The icon stayed but is now `aria-hidden`, so a screen reader
+  announces the type once rather than twice.
+- A **Dir button** on each occurrence row that copies the folder containing that
+  path (FR-021), alongside the existing click-the-path-to-copy-it-whole.
+  Delivered first as a copy-the-file-name button and corrected on the spot.
+- **Ascending order** for both sort fields: clicking the active field reverses
+  it, with a ↑/↓ indicator, and the direction persists across sessions like the
+  field already did. Both directions and the fallback for a bogus `sortDir` were
+  checked over HTTP; `EXPLAIN QUERY PLAN` over 100 000 groups confirms the
+  ascending queries still ride the existing indexes instead of falling back to a
+  temp b-tree sort.
+
 ---
 
 ## Dependencies & Execution Order

@@ -3,6 +3,10 @@ export type GroupKind = 'file' | 'directory';
 /** The two orderings the listing offers (spec FR-020). */
 export type SortBy = 'size' | 'occurrences';
 
+/** Both directions are offered: descending answers "what should I clean up
+ * first", ascending answers "what is safe to dismiss" (user request). */
+export type SortDir = 'asc' | 'desc';
+
 /** Groups per page in the listing (spec Assumptions). */
 export const PAGE_SIZE = 50;
 
@@ -35,6 +39,10 @@ export interface DuplicateGroupWithPaths extends DuplicateGroup {
 
 export function isSortBy(value: string): value is SortBy {
   return value === 'size' || value === 'occurrences';
+}
+
+export function isSortDir(value: string): value is SortDir {
+  return value === 'asc' || value === 'desc';
 }
 
 export function isGroupKind(value: string): value is GroupKind {

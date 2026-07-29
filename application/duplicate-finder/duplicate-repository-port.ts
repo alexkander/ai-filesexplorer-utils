@@ -3,6 +3,7 @@ import type {
   DuplicateGroupWithPaths,
   GroupKind,
   SortBy,
+  SortDir,
 } from '@/domain/duplicate-finder/duplicate-group';
 
 export type ScanRunState =
@@ -98,6 +99,7 @@ export interface DirectoryResult {
 
 export interface GroupQuery {
   sortBy: SortBy;
+  sortDir: SortDir;
   offset: number;
   limit: number;
 }

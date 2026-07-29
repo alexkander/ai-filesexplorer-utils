@@ -2,12 +2,14 @@ import {
   PAGE_SIZE,
   type DuplicateGroup,
   type SortBy,
+  type SortDir,
 } from '@/domain/duplicate-finder/duplicate-group';
 import type { DuplicateRepositoryPort } from './duplicate-repository-port';
 
 export interface ListDuplicateGroupsParams {
   repository: DuplicateRepositoryPort;
   sortBy: SortBy;
+  sortDir: SortDir;
   /** Zero-based. */
   page: number;
 }
@@ -33,11 +35,12 @@ export interface DuplicateGroupsPage {
 export function listDuplicateGroups(
   params: ListDuplicateGroupsParams,
 ): DuplicateGroupsPage {
-  const { repository, sortBy } = params;
+  const { repository, sortBy, sortDir } = params;
   const page = Math.max(0, Math.floor(params.page));
 
   const { groups, total } = repository.listGroups({
     sortBy,
+    sortDir,
     offset: page * PAGE_SIZE,
     limit: PAGE_SIZE,
   });

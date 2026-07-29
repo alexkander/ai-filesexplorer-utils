@@ -66,9 +66,10 @@ cheap grouping pass still runs over whatever checksums exist, and the state
 becomes `stopped` with the results labelled partial (research.md Decision 13).
 Stopping when nothing is running is a no-op, not an error.
 
-## `GET /api/duplicate-finder/groups?sortBy=size&page=0`
+## `GET /api/duplicate-finder/groups?sortBy=size&sortDir=desc&page=0`
 
-The paginated listing (FR-018, FR-020, SC-004). `sortBy` is `size` (default) or
+`sortDir` is `desc` (default) or `asc`; anything else falls back to `desc`. The
+paginated listing (FR-018, FR-020, SC-004). `sortBy` is `size` (default) or
 `occurrences`; `page` is zero-based; the page size is fixed at 50.
 
 **Response `200`**:

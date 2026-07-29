@@ -4,14 +4,19 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { ScanLine } from 'lucide-react';
 import { Button } from '@/infrastructure/ui/components/button';
-import type { SortBy } from '@/domain/duplicate-finder/duplicate-group';
+import type {
+  SortBy,
+  SortDir,
+} from '@/domain/duplicate-finder/duplicate-group';
 import {
   loadIncludeFolders,
   loadLastPath,
   loadSortBy,
+  loadSortDir,
   saveIncludeFolders,
   saveLastPath,
   saveSortBy,
+  saveSortDir,
 } from '../scan-preferences-storage';
 import { DuplicateGroupList } from './duplicate-group-list';
 import { ScanStatusPanel } from './scan-status-panel';
@@ -21,6 +26,7 @@ export function DuplicateFinderView() {
   const [rootPath, setRootPath] = useState('');
   const [includeFolders, setIncludeFolders] = useState(false);
   const [sortBy, setSortBy] = useState<SortBy>('size');
+  const [sortDir, setSortDir] = useState<SortDir>('desc');
   const { status, starting, error, tick, scan, stop, refetch } =
     useScanStatus();
 
@@ -32,6 +38,7 @@ export function DuplicateFinderView() {
     setRootPath(loadLastPath());
     setIncludeFolders(loadIncludeFolders());
     setSortBy(loadSortBy());
+    setSortDir(loadSortDir());
   }, []);
 
   const handleScan = () => {
@@ -40,9 +47,11 @@ export function DuplicateFinderView() {
     void scan(rootPath.trim(), includeFolders);
   };
 
-  const handleSortByChange = (next: SortBy) => {
-    setSortBy(next);
-    saveSortBy(next);
+  const handleSortChange = (nextBy: SortBy, nextDir: SortDir) => {
+    setSortBy(nextBy);
+    setSortDir(nextDir);
+    saveSortBy(nextBy);
+    saveSortDir(nextDir);
   };
 
   const isRunning = status?.state === 'running';
@@ -111,7 +120,8 @@ export function DuplicateFinderView() {
       {hasResults ? (
         <DuplicateGroupList
           sortBy={sortBy}
-          onSortByChange={handleSortByChange}
+          sortDir={sortDir}
+          onSortChange={handleSortChange}
           refreshKey={tick}
           onResultsChanged={() => void refetch()}
         />

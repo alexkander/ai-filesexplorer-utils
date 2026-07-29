@@ -58,7 +58,7 @@ interface DuplicateRepositoryPort {
 ```
 
 `GroupQuery` is
-`{ sortBy: 'size' | 'occurrences'; offset: number; limit: number }`.
+`{ sortBy: 'size' | 'occurrences'; sortDir: 'asc' | 'desc'; offset: number; limit: number }`.
 
 Shape notes settled during implementation:
 
@@ -110,10 +110,16 @@ Shape notes settled during implementation:
   process dies, before phase 6 ever runs. `clearResults` physically removes them
   at the start of the next successful grouping pass; the `scan_seq` filter is
   what makes the window in between safe.
-- **`listGroups` is ordered totally**: `ORDER BY <sort key> DESC, checksum`, so
-  paging never skips or repeats a row when two groups tie (research.md Decision
-  11). `total` accompanies the page so the UI can render page controls without a
-  second round trip.
+- **`listGroups` is ordered totally**: the sort key plus `checksum` as a
+  tiebreaker, so paging never skips or repeats a row when two groups tie
+  (research.md Decision 11). `total` accompanies the page so the UI can render
+  page controls without a second round trip.
+- **Ascending is the exact reverse of descending**, tie-break included:
+  `ORDER BY size DESC, checksum ASC` versus `ORDER BY size ASC, checksum DESC`.
+  That is deliberate — SQLite serves the reversed form by scanning the same
+  index backwards, whereas tie-breaking ascending on `checksum ASC` mixes
+  directions within one `ORDER BY` and forces a temp b-tree sort of the whole
+  result set (confirmed with `EXPLAIN QUERY PLAN` against 100 000 groups).
 - **`clearResults` only clears the derived tables** (`duplicate_groups`,
   `duplicate_occurrences`). It never touches `scanned_files`, which is the
   cross-scan cache.

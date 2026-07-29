@@ -7,8 +7,11 @@ import { CopyablePath } from '@/infrastructure/ui/components/copyable-path';
 import type {
   DuplicateGroup,
   SortBy,
+  SortDir,
 } from '@/domain/duplicate-finder/duplicate-group';
 import { cn } from '@/lib/utils';
+import { getParentPath } from '@/domain/scanning/path-info';
+import { CopyButton } from './copy-button';
 import { exactBytesLabel, humanizeSize } from './format-size';
 
 interface GroupsPage {
@@ -30,12 +33,14 @@ function groupKey(group: Pick<DuplicateGroup, 'checksum' | 'kind'>): string {
 
 export function DuplicateGroupList({
   sortBy,
-  onSortByChange,
+  sortDir,
+  onSortChange,
   refreshKey,
   onResultsChanged,
 }: {
   sortBy: SortBy;
-  onSortByChange: (sortBy: SortBy) => void;
+  sortDir: SortDir;
+  onSortChange: (sortBy: SortBy, sortDir: SortDir) => void;
   /** Bumped by the status hook on every poll, so the listing refreshes in
    * lockstep with the panel instead of going stale mid-scan. */
   refreshKey: number;
@@ -48,11 +53,11 @@ export function DuplicateGroupList({
 
   const fetchPage = useCallback(async (): Promise<GroupsPage | null> => {
     const res = await fetch(
-      `/api/duplicate-finder/groups?sortBy=${sortBy}&page=${page}`,
+      `/api/duplicate-finder/groups?sortBy=${sortBy}&sortDir=${sortDir}&page=${page}`,
     );
     if (!res.ok) return null;
     return (await res.json()) as GroupsPage;
-  }, [sortBy, page]);
+  }, [sortBy, sortDir, page]);
 
   const load = useCallback(async () => {
     const next = await fetchPage();
@@ -71,10 +76,16 @@ export function DuplicateGroupList({
 
   // Changing the sort re-orders the whole result set, so staying on page 7
   // would land the user somewhere arbitrary (spec User Story 1, scenario 6).
-  const changeSort = (next: SortBy) => {
+  // Clicking the field that is already active flips its direction — the same
+  // interaction the comparison tool's ignored-paths view already uses.
+  const changeSort = (field: SortBy) => {
     setPage(0);
     setExpanded({});
-    onSortByChange(next);
+    if (field === sortBy) {
+      onSortChange(field, sortDir === 'desc' ? 'asc' : 'desc');
+    } else {
+      onSortChange(field, 'desc');
+    }
   };
 
   const toggle = async (group: DuplicateGroup) => {
@@ -151,13 +162,19 @@ export function DuplicateGroupList({
             key={option.value}
             type="button"
             onClick={() => changeSort(option.value)}
+            title={
+              sortBy === option.value
+                ? `Click to reverse (currently ${sortDir === 'desc' ? 'highest first' : 'lowest first'})`
+                : `Sort by ${option.label.toLowerCase()}`
+            }
             className={cn(
               'rounded px-2 py-1 hover:bg-accent',
               sortBy === option.value &&
                 'bg-accent font-medium text-foreground',
             )}
           >
-            {option.label} ↓
+            {option.label}
+            {sortBy === option.value && (sortDir === 'desc' ? ' ↓' : ' ↑')}
           </button>
         ))}
       </div>
@@ -182,12 +199,18 @@ export function DuplicateGroupList({
                   />
                 )}
                 {group.kind === 'directory' ? (
-                  <Folder className="size-4 shrink-0" aria-label="Folder" />
+                  <Folder className="size-4 shrink-0" aria-hidden="true" />
                 ) : (
-                  <File className="size-4 shrink-0" aria-label="File" />
+                  <File className="size-4 shrink-0" aria-hidden="true" />
                 )}
                 <span className="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground">
                   {group.checksum}
+                </span>
+                {/* The icon alone is easy to misread at a glance, and the two
+                    kinds behave differently (a folder group collapses the
+                    files inside it), so the type is spelled out too. */}
+                <span className="w-16 shrink-0 text-xs text-muted-foreground">
+                  {group.kind === 'directory' ? 'Folder' : 'File'}
                 </span>
                 {group.isEmpty && (
                   <span className="shrink-0 rounded bg-amber-100 px-1.5 py-0.5 text-xs text-amber-800 dark:bg-amber-950 dark:text-amber-300">
@@ -212,6 +235,16 @@ export function DuplicateGroupList({
                       <CopyablePath
                         path={path}
                         className="min-w-0 flex-1 truncate text-xs"
+                      />
+                      <CopyButton
+                        value={path}
+                        label="Path"
+                        title={`Copy full path: ${path}`}
+                      />
+                      <CopyButton
+                        value={getParentPath(path) ?? '/'}
+                        label="Dir"
+                        title={`Copy containing folder: ${getParentPath(path) ?? '/'}`}
                       />
                       <Button
                         variant="ghost"

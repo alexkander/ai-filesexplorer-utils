@@ -278,8 +278,16 @@ the ignored-paths view, re-scan, and confirm the paths come back.
 - **FR-019**: A group row MUST expand to reveal every path where that content
   appears.
 - **FR-020**: The user MUST be able to sort the listing by size or by number of
-  occurrences, and the chosen sort MUST be remembered across sessions.
-- **FR-021**: The user MUST be able to copy any reported path to the clipboard.
+  occurrences, in either direction, and both the chosen field and direction MUST
+  be remembered across sessions. (Direction added after the first implementation
+  pass, at the user's request — descending answers "what should I clean up
+  first", ascending answers "what is safe to dismiss".)
+- **FR-020a**: Each group row MUST state whether it is a file or a folder in
+  words, not by icon alone (user request) — the two kinds behave differently,
+  since a folder group collapses the duplicate files inside it.
+- **FR-021**: The user MUST be able to copy any reported path to the clipboard,
+  and separately to copy just the folder that contains it (user request) — that
+  is what you need to go open the location.
 - **FR-022**: The system MUST show an explicit "no duplicates found" state, and
   MUST distinguish it from "no scan has been run yet".
 - **FR-023**: The results, including the timestamp of the scan that produced

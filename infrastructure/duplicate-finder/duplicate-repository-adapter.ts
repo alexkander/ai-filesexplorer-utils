@@ -13,10 +13,13 @@ import type {
   ScanProgress,
   ScanState,
 } from '@/application/duplicate-finder/duplicate-repository-port';
+import type Database from 'better-sqlite3';
 import type {
   DuplicateGroup,
   DuplicateGroupWithPaths,
   GroupKind,
+  SortBy,
+  SortDir,
 } from '@/domain/duplicate-finder/duplicate-group';
 import { db } from './sqlite-client';
 
@@ -364,21 +367,41 @@ const insertOccurrenceStmt = db.prepare(`
 // root's results on screen — `clearResults` only reclaims the space later.
 const CURRENT_SCAN_SEQ = `(SELECT scan_seq FROM scan_state WHERE id = 1)`;
 
-const listGroupsBySizeStmt = db.prepare(`
-  SELECT checksum, kind, size, occurrence_count, is_empty
-  FROM duplicate_groups
-  WHERE scan_seq = ${CURRENT_SCAN_SEQ}
-  ORDER BY size DESC, checksum
-  LIMIT @limit OFFSET @offset
-`);
-
-const listGroupsByCountStmt = db.prepare(`
-  SELECT checksum, kind, size, occurrence_count, is_empty
-  FROM duplicate_groups
-  WHERE scan_seq = ${CURRENT_SCAN_SEQ}
-  ORDER BY occurrence_count DESC, checksum
-  LIMIT @limit OFFSET @offset
-`);
+// One statement per (field, direction). The ascending variants tie-break on
+// `checksum DESC` on purpose: that makes them the exact reverse of the
+// descending ones, which SQLite can serve by scanning the very same index
+// backwards. Tie-breaking ascending on `checksum ASC` would mix directions
+// within one ORDER BY and force a temp b-tree sort of the whole result set.
+const listGroupsStmts: Record<`${SortBy}-${SortDir}`, Database.Statement> = {
+  'size-desc': db.prepare(`
+    SELECT checksum, kind, size, occurrence_count, is_empty
+    FROM duplicate_groups
+    WHERE scan_seq = ${CURRENT_SCAN_SEQ}
+    ORDER BY size DESC, checksum ASC
+    LIMIT @limit OFFSET @offset
+  `),
+  'size-asc': db.prepare(`
+    SELECT checksum, kind, size, occurrence_count, is_empty
+    FROM duplicate_groups
+    WHERE scan_seq = ${CURRENT_SCAN_SEQ}
+    ORDER BY size ASC, checksum DESC
+    LIMIT @limit OFFSET @offset
+  `),
+  'occurrences-desc': db.prepare(`
+    SELECT checksum, kind, size, occurrence_count, is_empty
+    FROM duplicate_groups
+    WHERE scan_seq = ${CURRENT_SCAN_SEQ}
+    ORDER BY occurrence_count DESC, checksum ASC
+    LIMIT @limit OFFSET @offset
+  `),
+  'occurrences-asc': db.prepare(`
+    SELECT checksum, kind, size, occurrence_count, is_empty
+    FROM duplicate_groups
+    WHERE scan_seq = ${CURRENT_SCAN_SEQ}
+    ORDER BY occurrence_count ASC, checksum DESC
+    LIMIT @limit OFFSET @offset
+  `),
+};
 
 const countGroupsStmt = db.prepare(`
   SELECT COUNT(*) AS total FROM duplicate_groups
@@ -687,10 +710,7 @@ export const duplicateRepositoryAdapter: DuplicateRepositoryPort = {
   },
 
   listGroups(query: GroupQuery) {
-    const statement =
-      query.sortBy === 'occurrences'
-        ? listGroupsByCountStmt
-        : listGroupsBySizeStmt;
+    const statement = listGroupsStmts[`${query.sortBy}-${query.sortDir}`];
     const rows = statement.all({
       limit: query.limit,
       offset: query.offset,

@@ -1,13 +1,17 @@
 import {
   isSortBy,
+  isSortDir,
   type SortBy,
+  type SortDir,
 } from '@/domain/duplicate-finder/duplicate-group';
 
 const PATH_KEY = 'duplicate-finder:last-path';
 const INCLUDE_FOLDERS_KEY = 'duplicate-finder:include-folders';
 const SORT_KEY = 'duplicate-finder:sort-by';
+const SORT_DIR_KEY = 'duplicate-finder:sort-dir';
 
 const DEFAULT_SORT: SortBy = 'size';
+const DEFAULT_SORT_DIR: SortDir = 'desc';
 
 /**
  * Remembers the scan form's inputs and the listing's sort, client-side only
@@ -44,4 +48,15 @@ export function loadSortBy(): SortBy {
 export function saveSortBy(sortBy: SortBy): void {
   if (typeof window === 'undefined') return;
   window.localStorage.setItem(SORT_KEY, sortBy);
+}
+
+export function loadSortDir(): SortDir {
+  if (typeof window === 'undefined') return DEFAULT_SORT_DIR;
+  const raw = window.localStorage.getItem(SORT_DIR_KEY);
+  return raw && isSortDir(raw) ? raw : DEFAULT_SORT_DIR;
+}
+
+export function saveSortDir(sortDir: SortDir): void {
+  if (typeof window === 'undefined') return;
+  window.localStorage.setItem(SORT_DIR_KEY, sortDir);
 }
