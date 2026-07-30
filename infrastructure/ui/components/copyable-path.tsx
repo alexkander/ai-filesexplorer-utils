@@ -12,9 +12,13 @@ import { cn } from '@/lib/utils';
 export function CopyablePath({
   path,
   className,
+  title = 'Click to copy',
 }: {
   path: string;
   className?: string;
+  /** Overridable because a truncated path needs its full value on hover more
+   * than it needs to be told it is clickable (user request). */
+  title?: string;
 }) {
   const [copied, setCopied] = useState(false);
 
@@ -32,7 +36,7 @@ export function CopyablePath({
     <button
       type="button"
       onClick={() => void handleClick()}
-      title="Click to copy"
+      title={title}
       className={cn('text-left font-mono hover:underline', className)}
     >
       {copied ? 'Copied!' : path}

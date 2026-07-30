@@ -12,4 +12,9 @@ export const menuEntries: MenuEntry[] = [
     label: 'Compare Directories',
     route: '/directory-comparison',
   },
+  {
+    key: 'duplicate-finder',
+    label: 'Find Duplicates',
+    route: '/duplicate-finder',
+  },
 ];
